@@ -17,6 +17,22 @@ Not intended for:
 
 > **Why this matters**: Native digital PDFs already have searchable text and optimized compression. This tool adds OCR to make scanned images searchable and applies specialized compression for scanned content.
 
+## Screenshots
+
+### Web Interface
+
+Upload and process PDFs through a simple web interface:
+
+![Starting Interface](images/streamlit_starting_ui.png)
+
+Processing in progress:
+
+![Processing](images/streamlit_processing_ui.png)
+
+Results with download:
+
+![Results](images/streamlit_ending_ui.png)
+
 ## Features
 
 - **OCR Processing**: Add searchable text layers to scanned pages using Tesseract OCR
@@ -178,6 +194,8 @@ with open("processed.pdf", "wb") as f:
 
 ### n8n Integration
 
+![n8n Workflow Example](images/n8n_simple.png)
+
 1. Add **HTTP Request** node
 2. Method: `POST`
 3. URL: `http://localhost:8502/api/process`
@@ -187,6 +205,8 @@ with open("processed.pdf", "wb") as f:
    - `mode` = `auto`
    - `preset` = `balanced`
 6. Add second **HTTP Request** node to download using `file_id` from response
+
+See [N8N_BATCH_WORKFLOW.md](N8N_BATCH_WORKFLOW.md) for complete workflow examples including Google Drive and Dropbox integration.
 
 ### API Parameters
 
