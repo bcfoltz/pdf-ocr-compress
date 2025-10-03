@@ -1,0 +1,39 @@
+# Windows System Dependencies Installation
+# Run these PowerShell commands as Administrator (or use the install_windows.ps1 script)
+
+# Method 1: Using WinGet (Windows 10/11) - RECOMMENDED
+winget install -e --id UB-Mannheim.TesseractOCR
+
+# Method 2: Manual Tesseract Installation
+# Download from: https://github.com/UB-Mannheim/tesseract/wiki
+# Install to default location: C:\Program Files\Tesseract-OCR
+
+# Auto-add Tesseract to PATH
+$tessExe = Get-ChildItem 'C:\Program Files\Tesseract-OCR' -Recurse -Filter tesseract.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $tessExe) { Write-Error "Tesseract not found in C:\Program Files\Tesseract-OCR"; exit 1 }
+$tessBin = Split-Path $tessExe
+$env:Path = "$env:Path;$tessBin"
+[Environment]::SetEnvironmentVariable('Path', "$env:Path", 'User')
+"Added to PATH: $tessBin"
+
+# Verify Tesseract installation (open NEW PowerShell after PATH change)
+# tesseract --version
+
+# Install Ghostscript
+$uri = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10060/gs10060w64.exe'  # update if newer version available
+$dst = "$env:TEMP\gssetup.exe"
+Invoke-WebRequest -Uri $uri -OutFile $dst
+Start-Process -FilePath $dst -Wait  # accept defaults
+Remove-Item $dst
+
+# Auto-add Ghostscript to PATH
+$gsExe = Get-ChildItem 'C:\Program Files\gs' -Recurse -Filter gswin64c.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if ($gsExe) {
+    $gsBin = Split-Path $gsExe
+    $env:Path = "$env:Path;$gsBin"
+    [Environment]::SetEnvironmentVariable('Path', "$env:Path", 'User')
+    "Added to PATH: $gsBin"
+}
+
+# Verify Ghostscript installation (new PowerShell window after PATH change)
+# gswin64c -v
