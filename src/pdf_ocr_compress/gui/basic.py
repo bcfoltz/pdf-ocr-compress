@@ -178,14 +178,14 @@ def _render_defaults_panel(cfg) -> None:
             placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
             key="def_output_dir",
         )
-        if st.button("📁 Browse…", key="def_output_dir_browse"):
-            try:
-                chosen = _pick_folder_dialog(initialdir=new_output_dir_str or None)
-                if chosen:
-                    st.session_state["def_output_dir"] = chosen
-                    st.rerun()
-            except RuntimeError as e:
-                st.warning(str(e))
+        st.button(
+            "📁 Browse…",
+            key="def_output_dir_browse",
+            on_click=_on_browse_click,
+            args=("def_output_dir", new_output_dir_str),
+        )
+        if browse_err := st.session_state.pop("_browse_err_def_output_dir", None):
+            st.warning(browse_err)
         new_batch_concurrency = st.slider(
             "Batch concurrency",
             min_value=1,
@@ -283,6 +283,29 @@ def _timestamped_batch_subdir(base: Path) -> Path:
     sub = base / f"batch_{stamp}"
     sub.mkdir(parents=True, exist_ok=True)
     return sub
+
+
+def _on_browse_click(target_key: str, initial_value: str) -> None:
+    """`on_click` callback for the Browse buttons.
+
+    Pops a native folder picker; if the user chooses a folder, writes
+    it to `st.session_state[target_key]` (the linked text_input's key).
+    Streamlit only allows writing to a widget-bound session_state key
+    from inside a callback (or before the widget's first render in
+    the current script run) — doing it after the `if st.button():`
+    line raises StreamlitAPIException because the widget has already
+    been instantiated.
+
+    Any RuntimeError from `_pick_folder_dialog` (e.g. headless env)
+    is parked in a sibling session_state slot so the post-rerun render
+    path can surface a friendly warning without crashing the page.
+    """
+    try:
+        chosen = _pick_folder_dialog(initialdir=initial_value or None)
+        if chosen:
+            st.session_state[target_key] = chosen
+    except RuntimeError as exc:
+        st.session_state[f"_browse_err_{target_key}"] = str(exc)
 
 
 def _pick_folder_dialog(initialdir: str | None = None) -> str | None:
@@ -624,14 +647,14 @@ def main():
             placeholder=r"e.g. G:\My Drive\Book Scans\Inbox",
             key="batch_in_folder",
         )
-        if st.button("📁 Browse…", key="batch_in_browse"):
-            try:
-                chosen = _pick_folder_dialog(initialdir=batch_input_folder_str or None)
-                if chosen:
-                    st.session_state["batch_in_folder"] = chosen
-                    st.rerun()
-            except RuntimeError as e:
-                st.warning(str(e))
+        st.button(
+            "📁 Browse…",
+            key="batch_in_browse",
+            on_click=_on_browse_click,
+            args=("batch_in_folder", batch_input_folder_str),
+        )
+        if browse_err := st.session_state.pop("_browse_err_batch_in_folder", None):
+            st.warning(browse_err)
         batch_output_folder_str = st.text_input(
             "Output folder (optional)",
             placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
@@ -643,16 +666,17 @@ def main():
             ),
             key="batch_out_folder",
         )
-        if st.button("📁 Browse…", key="batch_out_browse"):
-            try:
-                chosen = _pick_folder_dialog(
-                    initialdir=batch_output_folder_str or batch_input_folder_str or None
-                )
-                if chosen:
-                    st.session_state["batch_out_folder"] = chosen
-                    st.rerun()
-            except RuntimeError as e:
-                st.warning(str(e))
+        st.button(
+            "📁 Browse…",
+            key="batch_out_browse",
+            on_click=_on_browse_click,
+            args=(
+                "batch_out_folder",
+                batch_output_folder_str or batch_input_folder_str,
+            ),
+        )
+        if browse_err := st.session_state.pop("_browse_err_batch_out_folder", None):
+            st.warning(browse_err)
         try:
             folder_info = _collect_local_folder_inputs(batch_input_folder_str)
         except OSError as _e:
