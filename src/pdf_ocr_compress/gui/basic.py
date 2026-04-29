@@ -14,11 +14,15 @@ if __name__ == "__main__" and __package__ is None:
 import streamlit as st
 
 try:
+    from .config import get_config
+    from .config.settings import AppSettings
     from .core.batch import run_batch
     from .core.detect import needs_ocr
     from .core.pipeline import run_pipeline
     from .utils.errors import format_error_for_user
 except ImportError:
+    from pdf_ocr_compress.config import get_config
+    from pdf_ocr_compress.config.settings import AppSettings
     from pdf_ocr_compress.core.batch import run_batch
     from pdf_ocr_compress.core.detect import needs_ocr
     from pdf_ocr_compress.core.pipeline import run_pipeline
@@ -128,6 +132,101 @@ def _render_error(exc: Exception) -> None:
         st.caption(f"Error code: `{error_code}`")
 
 
+_PRESET_CHOICES = ["smallest", "balanced", "archival"]
+_OVERSIZE_CHOICES = ["fallback", "warn", "fail"]
+
+
+def _render_defaults_panel(cfg) -> None:
+    """Sidebar expander: edit and persist AppSettings.
+
+    Per-run sidebar widgets below this expander pre-fill from the saved
+    values. After 'Save defaults' click, settings.json is written and
+    st.rerun() refreshes the page so per-run controls re-init.
+    """
+    s = cfg.settings
+    with st.sidebar.expander("⚙️  Defaults (saved across sessions)", expanded=False):
+        new_preset = st.selectbox(
+            "Default preset",
+            _PRESET_CHOICES,
+            index=(
+                _PRESET_CHOICES.index(s.default_preset)
+                if s.default_preset in _PRESET_CHOICES
+                else 0
+            ),
+            key="def_preset",
+        )
+        new_lang = st.text_input(
+            "Default OCR languages", value=s.default_language, key="def_lang"
+        )
+        new_jobs = st.slider(
+            "Default parallel jobs",
+            min_value=1,
+            max_value=max(1, min(32, os.cpu_count() or 8)),
+            value=int(s.default_jobs),
+            key="def_jobs",
+        )
+        new_output_dir_str = st.text_input(
+            "Default output directory (blank = unset)",
+            value=str(s.default_output_dir) if s.default_output_dir else "",
+            placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
+            key="def_output_dir",
+        )
+        new_batch_concurrency = st.slider(
+            "Batch concurrency",
+            min_value=1,
+            max_value=8,
+            value=int(s.batch_concurrency),
+            key="def_batch_conc",
+        )
+        new_oversize = st.selectbox(
+            "Oversize policy",
+            _OVERSIZE_CHOICES,
+            index=(
+                _OVERSIZE_CHOICES.index(s.oversize_policy)
+                if s.oversize_policy in _OVERSIZE_CHOICES
+                else 0
+            ),
+            help=(
+                "fallback = retry with smallest preset, then passthrough; "
+                "warn = keep larger output but warn; "
+                "fail = raise an error."
+            ),
+            key="def_oversize",
+        )
+        new_tess_timeout = st.number_input(
+            "Tesseract timeout (seconds; 0 = no timeout)",
+            min_value=0,
+            value=int(s.tesseract_timeout),
+            step=10,
+            key="def_tess_timeout",
+        )
+
+        candidate = AppSettings(
+            default_preset=new_preset,
+            default_language=new_lang,
+            default_jobs=int(new_jobs),
+            default_output_dir=(
+                Path(new_output_dir_str).expanduser()
+                if new_output_dir_str.strip()
+                else None
+            ),
+            batch_concurrency=int(new_batch_concurrency),
+            oversize_policy=new_oversize,
+            tesseract_timeout=int(new_tess_timeout),
+        )
+        is_dirty = candidate != s
+
+        if st.button("💾 Save defaults", disabled=not is_dirty, key="def_save"):
+            try:
+                if candidate.default_output_dir is not None:
+                    candidate.default_output_dir.mkdir(parents=True, exist_ok=True)
+                cfg.save_settings(candidate)
+                st.success("Defaults saved.")
+                st.rerun()
+            except OSError as exc:
+                _render_error(exc)
+
+
 def _resolve_output_dir(
     cfg, override: Path | None, fallback_factory
 ) -> tuple[Path, str]:
@@ -166,6 +265,10 @@ def main():
         "• Never overwrites originals • Always writes brand-new files • Handles very large PDFs."
     )
 
+    cfg = get_config()
+    _render_defaults_panel(cfg)
+    s = cfg.settings  # shorthand for per-run pre-fill below
+
     with st.expander("📄 Is this tool right for your PDF?"):
         st.write("""
         **✅ IDEAL for this tool:**
@@ -197,13 +300,17 @@ def main():
         )
         preset = st.selectbox(
             "Quality preset",
-            ["balanced", "archival", "smallest"],
-            index=0,
-            help="archival = minimal change; balanced = high quality/smaller; smallest = most aggressive.",
+            _PRESET_CHOICES,
+            index=(
+                _PRESET_CHOICES.index(s.default_preset)
+                if s.default_preset in _PRESET_CHOICES
+                else 0
+            ),
+            help="smallest = most aggressive (default for ScanSnap); balanced = high quality/smaller; archival = minimal change.",
         )
         lang = st.text_input(
             "OCR languages (Tesseract codes)",
-            value="eng",
+            value=s.default_language,
             help="Use + to combine, e.g. eng+spa",
         )
         pdfa = st.checkbox("Produce PDF/A-2", value=False)
@@ -214,7 +321,7 @@ def main():
             "Parallel jobs",
             min_value=1,
             max_value=max_jobs,
-            value=min(4, max_jobs),
+            value=min(int(s.default_jobs), max_jobs),
             step=1,
         )
 
