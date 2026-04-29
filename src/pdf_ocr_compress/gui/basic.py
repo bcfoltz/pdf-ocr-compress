@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # Add src to path for imports
@@ -252,6 +253,19 @@ def _resolve_output_dir(
             return fallback_factory(), "fallback_after_unwritable"
 
     return fallback_factory(), "fallback"
+
+
+def _timestamped_batch_subdir(base: Path) -> Path:
+    """Wrap `base` in a `batch_YYYYMMDD-HHMMSS/` subfolder.
+
+    Used in batch mode when the output dir comes from
+    cfg.settings.default_output_dir to prevent batch_report.json
+    collisions across consecutive runs.
+    """
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    sub = base / f"batch_{stamp}"
+    sub.mkdir(parents=True, exist_ok=True)
+    return sub
 
 
 def main():
@@ -515,42 +529,114 @@ def main():
             # Temp dir stays for the session; manual cleanup is fine for very large outputs.
             pass
 
-    # --- Batch upload section ---
+    # --- Batch section ---
     st.divider()
     st.subheader("📦 Batch: process multiple PDFs at once")
     st.caption(
-        "Drop several PDFs; each is processed with the same settings. A "
-        "batch_report.json summarizing every file is downloadable when done."
+        "Process several PDFs with the same settings. A batch_report.json "
+        "summarizing every file is written next to the outputs."
     )
 
-    batch_uploads = st.file_uploader(
-        "Drop multiple PDFs",
-        type=["pdf"],
-        accept_multiple_files=True,
-        key="batch_uploader",
+    batch_source = st.radio(
+        "Source",
+        ["Upload multiple PDFs in browser", "Use local folder path (no size limit)"],
+        key="batch_source",
+        help=(
+            "Upload mode reads files through the browser (subject to "
+            "Streamlit's upload limit). Local folder mode points at a "
+            "directory on disk — required for multi-GB inputs."
+        ),
     )
+
+    batch_uploads = None
+    batch_input_folder_str = ""
+    batch_output_folder_str = ""
+    folder_info = None
+
+    if batch_source == "Upload multiple PDFs in browser":
+        batch_uploads = st.file_uploader(
+            "Drop multiple PDFs",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="batch_uploader",
+        )
+        batch_btn_disabled = not batch_uploads
+    else:
+        batch_input_folder_str = st.text_input(
+            "Input folder (contains PDFs to process)",
+            placeholder=r"e.g. G:\My Drive\Book Scans\Inbox",
+            key="batch_in_folder",
+        )
+        batch_output_folder_str = st.text_input(
+            "Output folder (blank = use default_output_dir, else <input>/processed/)",
+            placeholder="leave blank to follow your settings",
+            key="batch_out_folder",
+        )
+        try:
+            folder_info = _collect_local_folder_inputs(batch_input_folder_str)
+        except OSError as _e:
+            folder_info = {
+                "valid": False,
+                "msg": f"Cannot read folder: {_e}",
+                "pdf_count": 0,
+                "total_bytes": 0,
+            }
+        if folder_info["msg"]:
+            (st.info if folder_info["valid"] else st.warning)(folder_info["msg"])
+        batch_btn_disabled = not folder_info["valid"]
 
     batch_btn = st.button(
         "Process batch",
         type="primary",
-        disabled=not batch_uploads,
+        disabled=batch_btn_disabled,
         key="batch_run",
     )
 
-    if batch_btn and batch_uploads:
-        batch_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_batch_"))
-        batch_in = batch_workdir / "input"
-        batch_out = batch_workdir / "output"
-        batch_in.mkdir()
-
-        # Persist uploads to disk (chunked).
-        for uf in batch_uploads:
-            _chunk_copy(uf, batch_in / uf.name)
-
+    if batch_btn:
         pipeline_mode = {
             "OCR only": "ocr",
             "Compress only": "compress",
         }.get(mode, "auto")
+
+        # Resolve input dir + output dir based on mode. run_batch's
+        # internal `output_dir.mkdir(parents=True, exist_ok=True)` (see
+        # core/batch.py:172) handles directory creation for the factory-
+        # returned paths, so we only call _timestamped_batch_subdir when
+        # the resolver returned the user's `default_output_dir` directly
+        # (out_source == "setting").
+        if batch_source == "Upload multiple PDFs in browser":
+            batch_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_batch_"))
+            batch_in = batch_workdir / "input"
+            batch_in.mkdir()
+            for uf in batch_uploads:
+                _chunk_copy(uf, batch_in / uf.name)
+
+            out_dir, out_source = _resolve_output_dir(
+                cfg,
+                override=None,
+                fallback_factory=lambda: batch_workdir / "output",
+            )
+            if out_source == "setting":
+                out_dir = _timestamped_batch_subdir(out_dir)
+            batch_out = out_dir
+        else:
+            batch_in = Path(batch_input_folder_str).expanduser()
+            user_typed_out = batch_output_folder_str.strip()
+            override = Path(user_typed_out).expanduser() if user_typed_out else None
+            out_dir, out_source = _resolve_output_dir(
+                cfg,
+                override=override,
+                fallback_factory=lambda: batch_in / "processed",
+            )
+            if out_source == "setting":
+                out_dir = _timestamped_batch_subdir(out_dir)
+            batch_out = out_dir
+
+        if out_source == "fallback_after_unwritable":
+            st.warning(
+                f"default_output_dir ({cfg.settings.default_output_dir}) "
+                "isn't writable; outputs landed in the fallback location instead."
+            )
 
         progress_bar = st.progress(0.0, text="Starting batch…")
         live_table = st.empty()
@@ -582,7 +668,7 @@ def main():
                 progress_bar.progress(1.0, text="Done")
                 status.update(label="Batch complete ✅", state="complete")
         except Exception as e:
-            st.error(f"Batch failed at the orchestrator level: {e}")
+            _render_error(e)
             st.stop()
 
         # Final results table
@@ -613,24 +699,32 @@ def main():
         live_table.dataframe(final_rows, hide_index=True)
 
         st.success(report.one_line_summary())
+        if out_source in (
+            "override",
+            "setting",
+            "fallback",
+        ) and batch_source.startswith("Use local"):
+            st.caption(f"📂 Outputs in: `{batch_out}`")
 
-        # Per-file download buttons (successful files only)
-        for r in report.results:
-            if (
-                r.status == "ok"
-                and r.output_path is not None
-                and r.output_path.exists()
-            ):
-                with open(r.output_path, "rb") as f:
-                    st.download_button(
-                        f"⬇️ Download {r.input_path.name}",
-                        data=f.read(),
-                        file_name=r.output_path.name,
-                        mime="application/pdf",
-                        key=f"dl_{r.input_path.name}",
-                    )
+        # Per-file download buttons (upload mode only — outputs already on
+        # disk where the user pointed in folder mode).
+        if batch_source == "Upload multiple PDFs in browser":
+            for r in report.results:
+                if (
+                    r.status == "ok"
+                    and r.output_path is not None
+                    and r.output_path.exists()
+                ):
+                    with open(r.output_path, "rb") as f:
+                        st.download_button(
+                            f"⬇️ Download {r.input_path.name}",
+                            data=f.read(),
+                            file_name=r.output_path.name,
+                            mime="application/pdf",
+                            key=f"dl_{r.input_path.name}",
+                        )
 
-        # Batch report download
+        # Batch report download (every mode)
         report_path = batch_out / "batch_report.json"
         if report_path.exists():
             with open(report_path, "rb") as f:
