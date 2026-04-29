@@ -11,7 +11,7 @@ work, gated on the prior one. Pick up at the next non-completed phase.
 - [x] **Phase 2 — Pipeline rethink** (2026-04-29)
 - [x] **Phase 3 — Batch** (2026-04-29)
 - [x] **Phase 4 — API hardening** (2026-04-29)
-- [ ] **Phase 5 — GUI catchup**
+- [x] **Phase 5 — GUI catchup** (2026-04-29)
 - [ ] **Phase 6 — Documentation polish**
 
 ## Locked-in design invariants from Phase 0

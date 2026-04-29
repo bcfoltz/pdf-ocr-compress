@@ -128,81 +128,107 @@ Top-level directories worth knowing:
 - **Never overwrite originals.** Every operation writes a brand-new timestamped file and returns its path. Output naming convention: `_ocr_{timestamp}.pdf`, `_processed_{timestamp}.pdf`, `_compressed_{timestamp}.pdf`.
 - **Collision-safe paths.** `utils.file_utils.unique_output_path` is the single source of truth — microsecond-resolution timestamp plus integer counter fallback. Both `core/compress.py` and `core/ocr.py` import it. Don't reintroduce per-module copies.
 - **Three surfaces, one pipeline.** CLI, GUI, and API all call `core.pipeline.run_pipeline(input, output, *, mode, ...)` and surface its `ProcessResult` (size deltas, OCR routing, preset_actually_used, pdfminer text-extractability check, processing_seconds). Routing logic and the structured report live in `core/pipeline.py` only — don't reintroduce per-surface routing.
-- **Defaults flow from config.** `core.ocr.run_ocr` reads defaults from `config.get_config().settings` when its parameters are `None`. Preserve that pattern when extending. (CLI/GUI/API still hardcode their own defaults — wiring them into settings is Phase 5.)
+- **Defaults flow from config.** `core.ocr.run_ocr` reads defaults from `config.get_config().settings` when its parameters are `None`. Preserve that pattern when extending. (The GUI was wired into settings in Phase 5; the CLI's `ocr` / `compress` / `process` commands and the API's single-file upload form still hardcode their own defaults — that's the remaining cleanup.)
 - **Quality presets:** `archival` | `balanced` | `smallest` (default). Defined in `core/compress.py:_gs_args_for_preset`.
 - **Cross-platform Ghostscript binary lookup.** `core/compress.py:_gs_exe()` tries `gswin64c` → `gswin32c` → `gs` and raises `SystemToolError("ghostscript", ...)` if none are found. Don't hard-code, and don't catch the precheck error to silently substitute a default.
 - **Markdown style** (for README, etc.): blank line after every heading and around list blocks; no emphasis inside headings; bare URLs wrapped in angle brackets; always specify a code-fence language.
 
 ## Where I left off
 
-**Phase 4 closed (2026-04-29).** API is now real backend service
-material: SQLite persistence (file IDs and batch jobs survive a
-uvicorn restart), stable `APIError` wire shape on every 4xx/5xx,
-environment-aware `/health`, accurate OpenAPI docs at `/docs`, and a
-curl + jq smoke test that exercises everything end-to-end. Pick up at
-**Phase 5 (GUI catchup)** — see `ROADMAP.md`.
+**Phase 5 closed (2026-04-29).** GUI is now in line with everything
+Phase 1–4 added: defaults flow from `get_config().settings` (sidebar
+"⚙️ Defaults" expander persists the new `AppSettings`, with a Save
+button that round-trips through `ConfigManager.save_settings`); the
+batch section accepts a server-side folder path (matches the
+Google-Drive-mounted ScanSnap workflow — multi-GB inputs no longer
+require a browser upload); every exception site routes through
+`_render_error()` → `format_error_for_user`; three Browse buttons
+pop a native folder picker via `tkinter.filedialog` (works because
+this is a local-machine app — same machine as the browser; raises
+`RuntimeError` with a friendly message in headless / Docker
+environments). Browser click-through smoke test recorded in
+`tests/gui_smoke.md`. Pick up at **Phase 6 (Documentation polish)**
+— see `ROADMAP.md`.
 
-**Phase 4 deliverables:**
+**Phase 5 deliverables:**
 
-- `api/errors.py` — `APIError` Pydantic model + `APIException` carrier
-  + `install_exception_handlers(app)`. Three handlers wire into the
-  FastAPI app: `APIException` (server-raised), `PDFProcessingError`
-  (domain leak from `run_pipeline`), `RequestValidationError`
-  (FastAPI's automatic 422 wrapped to the same shape). Stable code
-  constants: `INPUT_NOT_PDF`, `INVALID_MODE`, `INVALID_PRESET`,
-  `INVALID_FOLDER`, `INVALID_OUTPUT_DIR`, `FILE_NOT_FOUND`,
-  `BATCH_JOB_NOT_FOUND`, `OCR_TOOL_MISSING`,
-  `GHOSTSCRIPT_TOOL_MISSING`, `PROCESSING_FAILED`,
-  `OUTPUT_GREW_NO_FALLBACK`, `VALIDATION_ERROR`, plus reserved
-  `FILE_TOO_LARGE` (no enforcement path yet).
-- `api/storage.py` — single SQLite owner. Tables: `files (file_id PK,
-  original_name, output_path, workdir, mode, preset, created_at,
-  expires_at)` and `batch_jobs (job_id PK, status, started_at,
-  finished_at, progress_current, progress_total, error_msg,
-  report_json)`. `Storage.__init__` runs `_mark_stale_running_jobs()`
-  once at boot, so any queued/running rows from a dead previous
-  process come back as `status='error'` with
-  `error_msg='server restarted mid-job'`. WAL journaling +
-  `check_same_thread=False` so BackgroundTasks workers can write
-  per-file progress while polls read.
-- `/health` reports: `version` (importlib.metadata),
-  `ghostscript_binary`, `tesseract_binary`, `tesseract_languages`
-  (parsed from `tesseract --list-langs`, handles stdout-or-stderr
-  builds), `queue_depth` (queued+running batch jobs). Binary detection
-  never raises — missing tools surface as null paths and an empty
-  language list, so monitoring can distinguish "API up" from "API up
-  but Tesseract missing".
-- OpenAPI: `responses=` declarations on every error path point at
-  `APIError`; `ProcessResponse` / `BatchRequest` /
-  `BatchAcceptedResponse` carry `json_schema_extra` examples so /docs
-  Try-it forms pre-fill with realistic values. Endpoint summaries +
-  tightened descriptions explain mode/preset semantics and the batch
-  failure ladder.
-- `tests/api_smoke.sh` — bash + curl + jq. Drives /health, /process
-  happy path + 400 INVALID_MODE error path, /download, /batch with a
-  2-file folder, polls /status until done, hits an unknown job_id for
-  404. Cross-platform path handling via `cygpath -w` on git-bash
-  (no-op on Linux/macOS). Exits 0 (PARTIAL PASS) when Ghostscript is
-  missing.
+- `gui/basic.py` — five new private helpers, all in one file (no
+  second GUI module per the "Out of scope" rule):
+  - `_resolve_output_dir(cfg, override, fallback_factory) -> (Path, source, OSError|None)`
+    — single resolver used by single-file, upload-batch, and
+    folder-batch flows. Returns the captured `OSError` on the
+    `fallback_after_unwritable` branch so the warning message can
+    show str(exc) (matters when Google Drive mounts intermittently
+    refuse writes).
+  - `_collect_local_folder_inputs(folder_str)` — pre-flight summary
+    for the new batch local-folder input (count + total bytes +
+    sensible message; non-recursive; expands `~`).
+  - `_render_error(exc)` — wraps the existing
+    `utils.errors.format_error_for_user` and renders st.error +
+    suggestions list + Error-code caption.
+  - `_render_defaults_panel(cfg)` — sidebar expander for editing
+    persistent `AppSettings` (preset, language, jobs, output dir,
+    batch concurrency, oversize policy, Tesseract timeout). Save
+    button is disabled while form values match saved values; on
+    click round-trips through `ConfigManager.save_settings` then
+    `st.rerun()`s so per-run controls re-init from the new defaults.
+  - `_timestamped_batch_subdir(base)` — wraps base in
+    `batch_YYYYMMDD-HHMMSS-fff/`. Microsecond resolution prevents
+    consecutive-batch report collisions.
+  - `_pick_folder_dialog(initialdir)` + `_on_browse_click(target_key, initial_value)`
+    — native folder picker. The `on_click=` callback pattern is
+    load-bearing: writing to a widget-bound session_state key from a
+    post-button-click `if` block raises StreamlitAPIException; the
+    callback fires before the rerun and is allowed to mutate.
+- Fixed: per-run `preset` selector now defaults to
+  `cfg.settings.default_preset` (was hardcoded to `"balanced"`,
+  contradicting design rule #4 — that's why the GUI shipped wrong
+  before Phase 5).
+- Fixed: batch download buttons survive Streamlit reruns triggered
+  by per-file download clicks. Result-rendering block reads from
+  `st.session_state["batch_results"]` outside `if batch_btn:`. The
+  same trap (Streamlit reruns the entire script on every widget
+  interaction) bites anywhere result UI lives inside an
+  `if button:` block; the single-file flow is technically vulnerable
+  too but only has one download button so the issue is invisible.
+- `tests/test_gui_helpers.py` — 11 unit tests covering both pure
+  helpers (5 for `_resolve_output_dir` including the OSError detail
+  capture, 6 for `_collect_local_folder_inputs`).
+- `tests/gui_smoke.md` — manual browser checklist, walked end-to-end.
+  Findings section at bottom records the four issues that surfaced
+  and were fixed live during the walkthrough.
 
-**Tests added:** `test_api_errors.py` (15), `test_api_storage.py`
-(11), `test_api_health.py` (5), `test_api_openapi.py` (11). 118/118
-total tests pass; ruff + black green; smoke script passes against a
-live uvicorn in ~3s on Windows git-bash.
+**Tests added:** `test_gui_helpers.py` (11). 129/129 total tests
+pass; ruff + black green; GUI import smoke test (`from
+pdf_ocr_compress.gui import main_gui`) green; Streamlit serves 200
+OK at `:8501`.
 
-**Honest gaps still open after Phase 4 (deferred to later phases):**
+**Honest gaps still open after Phase 5 (deferred to later phases):**
 
-- GUI browser click-through — Phase 5 deliverable.
-- `POST /api/batch/{job_id}/cancel` — still deferred. Adding it later
-  means polling a `should_cancel` flag inside `run_batch`; not hard,
-  just not done.
-- Existing single-file CLI/GUI/API surface defaults still hardcoded.
-  The `batch` surfaces and `run_pipeline` already read from
-  `get_config().settings`; the older `ocr` / `compress` / `process`
-  commands and the single-file upload form do not (Phase 5).
-- `FILE_TOO_LARGE` is reserved as a stable error code but has no
-  enforcement (no `max_upload_bytes` setting yet). Adding it means a
-  config setting + chunked upload handling.
+- **Tempdir cleanup on GUI failure paths.** Phase 5 dropped the
+  pre-existing `shutil.rmtree(workdir, ignore_errors=True)` cleanup
+  from the single-file pipeline-error block (`workdir` no longer
+  exists as a single variable after the resolver split). Single-file
+  uploads (`pdfgui_in_*` containing the input bytes) and upload-mode
+  batches (`pdfgui_batch_*` containing all uploaded inputs) leak on
+  failure. For 5 GB textbook scans (the user's real workload) that
+  can leak gigabytes per failed run. Fix: try/finally the run
+  blocks; cheap follow-up.
+- **Recursion into batch input subfolders.** `core/batch.py:148`
+  (`_list_pdfs`) is non-recursive and the GUI inherits that.
+  Touching recursion requires CLI + API + GUI changes — out of
+  scope for "GUI catchup."
+- **Per-run `oversize_policy` override.** Locked-in choice #3 of
+  the Phase 5 spec deferred this — the current setting-only surface
+  covers realistic use cases. Adding a per-run radio means plumbing
+  through `run_pipeline` / `compress` / `run_ocr`.
+- **CLI surface defaults still hardcoded.** The `pdf-ocr ocr` /
+  `pdf-ocr compress` / `pdf-ocr process` Typer commands and the
+  legacy API single-file upload form still hardcode preset/jobs/lang.
+  The GUI and `pdf-ocr batch` already read from `get_config().settings`.
+- `POST /api/batch/{job_id}/cancel` — still deferred from Phase 4.
+- `FILE_TOO_LARGE` is reserved as a stable API error code but has
+  no enforcement (no `max_upload_bytes` setting yet).
 
 ## Known issues / tech debt
 
@@ -212,16 +238,25 @@ The three Phase 0 pipeline bugs are FIXED in Phase 2 items 1–3 (see
 - **~~Starlette 1.0 major bump unverified at runtime.~~** Fixed in
   Phase 4: `tests/api_smoke.sh` posts a real PDF through `/api/process`
   end-to-end against a live uvicorn process.
-- **GUI not click-through tested in a browser.** Phase 5. The 4d
-  refactor swapped the routing block but no manual smoke test was
-  performed.
-- **CLI/GUI/API hardcode their own defaults.** They don't yet read
-  from `config.get_config()` for things like preset/jobs/lang
-  defaults — `run_pipeline` does, but the surface-level Typer/
-  Streamlit/Form defaults are still hardcoded. Phase 5 wires them in
-  (settings UI, default output dir, oversize-policy surface).
-- **Phase 4 API hardening + Phase 5 GUI catchup + Phase 6 docs
-  polish** all ahead. ROADMAP has the scope.
+- **~~GUI not click-through tested in a browser.~~** Closed in
+  Phase 5: `tests/gui_smoke.md` walked end-to-end; four real defects
+  caught and fixed during the walkthrough (recorded in the file's
+  Findings section).
+- **CLI surface defaults still hardcoded.** The `pdf-ocr ocr` /
+  `pdf-ocr compress` / `pdf-ocr process` Typer commands and the
+  legacy API single-file upload form still hardcode preset/jobs/lang.
+  The GUI was wired into settings in Phase 5; `pdf-ocr batch` and
+  `run_pipeline` already read from `get_config().settings`. Cheap
+  cleanup whenever someone touches those entry points.
+- **GUI tempdir leaks on pipeline failure.** Phase 5 dropped the
+  pre-existing `shutil.rmtree(workdir)` cleanup when `workdir` got
+  split into `input_workdir` + the resolver-returned `out_dir`.
+  Single-file uploads and upload-mode batches now leak `pdfgui_in_*`
+  / `pdfgui_batch_*` directories on failure. For 5 GB textbook
+  scans that can leak gigabytes per failed run. Cheap follow-up:
+  try/finally around the run blocks.
+- **Phase 6 docs polish** is the only remaining roadmap phase.
+  ROADMAP has the scope.
 
 ## Out of scope
 
