@@ -55,6 +55,39 @@ def _chunk_copy(
         shutil.copyfileobj(src_file_like, out_f, length=chunk_size)
 
 
+def _ensure_writable(path: Path) -> Path:
+    """mkdir -p the path; raise OSError if it can't be created/written."""
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _resolve_output_dir(
+    cfg, override: Path | None, fallback_factory
+) -> tuple[Path, str]:
+    """Resolve where output files go, in priority order.
+
+    Returns (path, source) where source is one of:
+      - "override":                   user-typed explicit path was used
+      - "setting":                    cfg.settings.default_output_dir was used
+      - "fallback":                   default_output_dir unset; factory used
+      - "fallback_after_unwritable":  default_output_dir set but mkdir raised
+
+    Caller decides whether to surface a "Saved to:" line, a one-shot
+    warning about an unhonored setting, etc.
+    """
+    if override is not None:
+        return _ensure_writable(override), "override"
+
+    setting = cfg.settings.default_output_dir
+    if setting is not None:
+        try:
+            return _ensure_writable(Path(setting)), "setting"
+        except OSError:
+            return fallback_factory(), "fallback_after_unwritable"
+
+    return fallback_factory(), "fallback"
+
+
 def main():
     """Main Streamlit application."""
     setup_streamlit()
