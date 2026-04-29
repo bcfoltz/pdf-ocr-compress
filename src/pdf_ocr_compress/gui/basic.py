@@ -1,12 +1,12 @@
 """Streamlit GUI for PDF OCR + Compression Tool."""
 
-from pathlib import Path
-import os
-import tempfile
-import shutil
-import time
 import io
+import os
+import shutil
 import sys
+import tempfile
+import time
+from pathlib import Path
 
 # Add src to path for imports
 if __name__ == "__main__" and __package__ is None:
@@ -15,26 +15,24 @@ if __name__ == "__main__" and __package__ is None:
 import streamlit as st
 
 try:
-    from .core.ocr import run_ocr
     from .core.compress import compress as run_compress
     from .core.detect import needs_ocr
+    from .core.ocr import run_ocr
 except ImportError:
-    from pdf_ocr_compress.core.ocr import run_ocr
     from pdf_ocr_compress.core.compress import compress as run_compress
     from pdf_ocr_compress.core.detect import needs_ocr
+    from pdf_ocr_compress.core.ocr import run_ocr
 
 
 def setup_streamlit():
     """Configure Streamlit app settings."""
     st.set_page_config(
-        page_title="PDF OCR + Compression", 
-        page_icon="🧰", 
-        layout="centered"
+        page_title="PDF OCR + Compression", page_icon="🧰", layout="centered"
     )
-    
+
     # Bump Streamlit limits for big uploads (has no effect on local-path mode).
     try:
-        st.set_option("server.maxUploadSize", 4096)   # MB
+        st.set_option("server.maxUploadSize", 4096)  # MB
         st.set_option("server.maxMessageSize", 4096)  # MB
     except Exception:
         pass
@@ -49,7 +47,9 @@ def _human(nbytes: int) -> str:
     return f"{nbytes:.1f} TB"
 
 
-def _chunk_copy(src_file_like: io.BufferedReader, dst_path: Path, chunk_size: int = 16 * 1024 * 1024):
+def _chunk_copy(
+    src_file_like: io.BufferedReader, dst_path: Path, chunk_size: int = 16 * 1024 * 1024
+):
     """Copy uploaded file to disk without loading it all into memory."""
     src_file_like.seek(0)
     with open(dst_path, "wb") as out_f:
@@ -59,14 +59,14 @@ def _chunk_copy(src_file_like: io.BufferedReader, dst_path: Path, chunk_size: in
 def main():
     """Main Streamlit application."""
     setup_streamlit()
-    
+
     st.title("🧰 PDF OCR + Compression")
     st.caption(
         "Process SCANNED PDFs with OCRmyPDF + Ghostscript. "
         "Designed for scanned documents, not native digital PDFs. "
         "• Never overwrites originals • Always writes brand-new files • Handles very large PDFs."
     )
-    
+
     with st.expander("📄 Is this tool right for your PDF?"):
         st.write("""
         **✅ IDEAL for this tool:**
@@ -89,41 +89,56 @@ def main():
         source_mode = st.radio(
             "File source",
             ["Upload in browser", "Use local file path (no size limit)"],
-            help="Local path mode reads directly from disk and bypasses any browser upload limit."
+            help="Local path mode reads directly from disk and bypasses any browser upload limit.",
         )
         mode = st.radio(
             "Processing mode",
             ["Auto (OCR if needed)", "OCR only", "Compress only"],
-            help="Auto: Detects scanned pages needing OCR, then compresses. OCR only: Force text recognition on scanned content. Compress only: Skip OCR, just optimize file size."
+            help="Auto: Detects scanned pages needing OCR, then compresses. OCR only: Force text recognition on scanned content. Compress only: Skip OCR, just optimize file size.",
         )
         preset = st.selectbox(
             "Quality preset",
             ["balanced", "archival", "smallest"],
             index=0,
-            help="archival = minimal change; balanced = high quality/smaller; smallest = most aggressive."
+            help="archival = minimal change; balanced = high quality/smaller; smallest = most aggressive.",
         )
         lang = st.text_input(
             "OCR languages (Tesseract codes)",
             value="eng",
-            help="Use + to combine, e.g. eng+spa"
+            help="Use + to combine, e.g. eng+spa",
         )
         pdfa = st.checkbox("Produce PDF/A-2", value=False)
         force_ocr = st.checkbox("Force OCR (even if text exists)", value=False)
 
         max_jobs = max(1, min(32, os.cpu_count() or 8))
-        jobs = st.slider("Parallel jobs", min_value=1, max_value=max_jobs, value=min(4, max_jobs), step=1)
+        jobs = st.slider(
+            "Parallel jobs",
+            min_value=1,
+            max_value=max_jobs,
+            value=min(4, max_jobs),
+            step=1,
+        )
 
     # --- File input widgets ---
     uploaded = None
     local_path_str = ""
 
     if source_mode == "Upload in browser":
-        uploaded = st.file_uploader("Choose a PDF (large files supported)", type=["pdf"])
+        uploaded = st.file_uploader(
+            "Choose a PDF (large files supported)", type=["pdf"]
+        )
     else:
-        local_path_str = st.text_input("Absolute path to a PDF on this computer", placeholder=r"C:\path\to\your\huge.pdf")
+        local_path_str = st.text_input(
+            "Absolute path to a PDF on this computer",
+            placeholder=r"C:\path\to\your\huge.pdf",
+        )
 
     # Process button logic
-    btn_disabled = (uploaded is None) if source_mode == "Upload in browser" else (not local_path_str.strip())
+    btn_disabled = (
+        (uploaded is None)
+        if source_mode == "Upload in browser"
+        else (not local_path_str.strip())
+    )
     run_btn = st.button("Process", type="primary", disabled=btn_disabled)
 
     # --- Selected file info (size display) ---
@@ -152,7 +167,9 @@ def main():
     # --- Main processing ---
     if run_btn:
         workdir = Path(tempfile.mkdtemp(prefix="pdfgui_"))
-        out_base = workdir / "output.pdf"  # base name; functions will create unique outputs
+        out_base = (
+            workdir / "output.pdf"
+        )  # base name; functions will create unique outputs
 
         # Determine input path
         if source_mode == "Upload in browser":
@@ -172,14 +189,22 @@ def main():
         with st.status("Analyzing PDF…", expanded=False) as status:
             try:
                 need_ocr = needs_ocr(in_path)
-                status.update(label=f"Analysis complete — OCR needed: {bool(force_ocr or need_ocr)}", state="complete")
+                status.update(
+                    label=f"Analysis complete — OCR needed: {bool(force_ocr or need_ocr)}",
+                    state="complete",
+                )
             except Exception as e:
                 need_ocr = True
-                status.update(label=f"Analysis failed, assuming OCR needed (ok): {e}", state="complete")
+                status.update(
+                    label=f"Analysis failed, assuming OCR needed (ok): {e}",
+                    state="complete",
+                )
 
         start = time.time()
         try:
-            with st.status("Processing… (large PDFs may take a while)", expanded=True) as status:
+            with st.status(
+                "Processing… (large PDFs may take a while)", expanded=True
+            ) as status:
                 if mode == "OCR only":
                     st.write("Step 1/1: OCR")
                     produced_path = run_ocr(
@@ -224,7 +249,7 @@ def main():
 
         # Report & download
         try:
-            in_size = (in_path.stat().st_size if in_path.exists() else 0)
+            in_size = in_path.stat().st_size if in_path.exists() else 0
             out_size = produced_path.stat().st_size
             elapsed = time.time() - start
             st.success(
@@ -233,7 +258,11 @@ def main():
             )
 
             # Suggested download name
-            stem = (Path(local_path_str).stem if source_mode.startswith("Use local") else Path(uploaded.name).stem)
+            stem = (
+                Path(local_path_str).stem
+                if source_mode.startswith("Use local")
+                else Path(uploaded.name).stem
+            )
             suffix = "_ocr" if mode == "OCR only" else "_processed"
             dl_name = f"{stem}{suffix}.pdf"
 

@@ -1,6 +1,8 @@
 # detect.py — simple heuristic to decide if OCR is needed
 from pathlib import Path
+
 from pdfminer.high_level import extract_text
+
 
 def needs_ocr(pdf_path: Path, sample_pages: int = 5) -> bool:
     """

@@ -1,8 +1,12 @@
 # compress.py — ALWAYS writes a brand-new file; never in-place
+import shutil
+import tempfile
+import time
 from pathlib import Path
-from subprocess import run, CalledProcessError
-import tempfile, time, shutil
+from subprocess import CalledProcessError, run
+
 import pikepdf
+
 
 def _gs_exe() -> str:
     for name in ("gswin64c", "gswin32c", "gs"):
@@ -10,6 +14,7 @@ def _gs_exe() -> str:
         if exe:
             return exe
     return "gswin64c"
+
 
 def _gs_args_for_preset(preset: str) -> list[str]:
     if preset == "archival":
@@ -22,21 +27,30 @@ def _gs_args_for_preset(preset: str) -> list[str]:
         return [
             "-dPDFSETTINGS=/ebook",
             "-dDetectDuplicateImages=true",
-            "-dColorImageDownsampleType=/Bicubic","-dColorImageResolution=300",
-            "-dGrayImageDownsampleType=/Bicubic","-dGrayImageResolution=300",
-            "-dMonoImageDownsampleType=/Subsample","-dMonoImageResolution=600",
-            "-dCompressFonts=true","-dSubsetFonts=true",
+            "-dColorImageDownsampleType=/Bicubic",
+            "-dColorImageResolution=300",
+            "-dGrayImageDownsampleType=/Bicubic",
+            "-dGrayImageResolution=300",
+            "-dMonoImageDownsampleType=/Subsample",
+            "-dMonoImageResolution=600",
+            "-dCompressFonts=true",
+            "-dSubsetFonts=true",
         ]
     if preset == "smallest":
         return [
             "-dPDFSETTINGS=/screen",
             "-dDetectDuplicateImages=true",
-            "-dColorImageDownsampleType=/Bicubic","-dColorImageResolution=150",
-            "-dGrayImageDownsampleType=/Bicubic","-dGrayImageResolution=150",
-            "-dMonoImageDownsampleType=/Subsample","-dMonoImageResolution=400",
-            "-dCompressFonts=true","-dSubsetFonts=true",
+            "-dColorImageDownsampleType=/Bicubic",
+            "-dColorImageResolution=150",
+            "-dGrayImageDownsampleType=/Bicubic",
+            "-dGrayImageResolution=150",
+            "-dMonoImageDownsampleType=/Subsample",
+            "-dMonoImageResolution=400",
+            "-dCompressFonts=true",
+            "-dSubsetFonts=true",
         ]
     raise ValueError("preset must be one of: archival, balanced, smallest")
+
 
 def _unique_name(base: Path, suffix: str = "_processed") -> Path:
     """Return a non-existing path next to base with timestamp to avoid collisions."""
@@ -48,7 +62,10 @@ def _unique_name(base: Path, suffix: str = "_processed") -> Path:
         cand = base.with_name(f"{base.stem}{suffix}_{ts}_{i}.pdf")
     return cand
 
-def ghostscript_compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Path:
+
+def ghostscript_compress(
+    input_pdf: Path, output_pdf: Path, preset: str = "balanced"
+) -> Path:
     """
     Runs Ghostscript and writes to a NEW file path (never the input).
     Returns the path GS actually wrote.
@@ -61,7 +78,9 @@ def ghostscript_compress(input_pdf: Path, output_pdf: Path, preset: str = "balan
         _gs_exe(),
         "-sDEVICE=pdfwrite",
         "-dCompatibilityLevel=1.7",
-        "-dNOPAUSE", "-dQUIET", "-dBATCH",
+        "-dNOPAUSE",
+        "-dQUIET",
+        "-dBATCH",
         *_gs_args_for_preset(preset),
         f"-sOutputFile={output_pdf}",
         str(input_pdf),
@@ -71,6 +90,7 @@ def ghostscript_compress(input_pdf: Path, output_pdf: Path, preset: str = "balan
     except CalledProcessError as e:
         raise RuntimeError(f"Ghostscript compression failed: {e}")
     return output_pdf
+
 
 def linearize(src: Path, dst: Path) -> Path:
     """
@@ -82,6 +102,7 @@ def linearize(src: Path, dst: Path) -> Path:
     with pikepdf.open(src) as pdf:
         pdf.save(dst, linearize=True)
     return dst
+
 
 def compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Path:
     """

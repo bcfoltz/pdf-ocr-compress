@@ -1,27 +1,26 @@
 """FastAPI server for PDF OCR + Compression REST API."""
 
 import os
-import time
-import tempfile
 import shutil
+import tempfile
+import time
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from datetime import datetime, timedelta
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-from ..core.ocr import run_ocr
 from ..core.compress import compress as run_compress
 from ..core.detect import needs_ocr
-
+from ..core.ocr import run_ocr
 
 app = FastAPI(
     title="PDF OCR + Compression API",
     description="REST API for processing scanned PDFs with OCR and compression",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 
@@ -35,6 +34,7 @@ file_storage = {}
 
 class ProcessResponse(BaseModel):
     """Response model for /api/process endpoint."""
+
     status: str
     message: str
     file_id: str
@@ -48,6 +48,7 @@ class ProcessResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Error response model."""
+
     status: str
     error: str
 
@@ -81,8 +82,8 @@ async def root():
         "endpoints": {
             "POST /api/process": "Process a PDF file",
             "GET /api/download/{file_id}": "Download processed file",
-            "GET /health": "Health check"
-        }
+            "GET /health": "Health check",
+        },
     }
 
 
@@ -96,11 +97,13 @@ async def health():
 async def process_pdf(
     file: UploadFile = File(..., description="PDF file to process"),
     mode: str = Form("auto", description="Processing mode: auto, ocr, compress"),
-    preset: str = Form("balanced", description="Quality preset: balanced, archival, smallest"),
+    preset: str = Form(
+        "balanced", description="Quality preset: balanced, archival, smallest"
+    ),
     language: str = Form("eng", description="OCR language codes (e.g., eng, eng+spa)"),
     pdfa: bool = Form(False, description="Produce PDF/A-2 compliant output"),
     force_ocr: bool = Form(False, description="Force OCR even if text exists"),
-    jobs: int = Form(4, description="Number of parallel jobs for OCR")
+    jobs: int = Form(4, description="Number of parallel jobs for OCR"),
 ):
     """
     Process a PDF file with OCR and/or compression.
@@ -154,7 +157,7 @@ async def process_pdf(
                 preset=preset,
                 pdfa=pdfa,
                 jobs=jobs,
-                force_ocr=force_ocr
+                force_ocr=force_ocr,
             )
 
         elif mode == "compress":
@@ -170,7 +173,7 @@ async def process_pdf(
                     preset=preset,
                     pdfa=pdfa,
                     jobs=jobs,
-                    force_ocr=True
+                    force_ocr=True,
                 )
                 output_path = run_compress(ocr_output, output_base, preset=preset)
             else:
@@ -188,7 +191,7 @@ async def process_pdf(
             "timestamp": datetime.now(),
             "original_name": file.filename,
             "mode": mode,
-            "preset": preset
+            "preset": preset,
         }
 
         return ProcessResponse(
@@ -200,7 +203,7 @@ async def process_pdf(
             original_size=original_size,
             output_size=output_size,
             reduction_percent=round(reduction_percent, 2),
-            processing_time=round(processing_time, 2)
+            processing_time=round(processing_time, 2),
         )
 
     except Exception as e:
@@ -234,15 +237,14 @@ async def download_file(file_id: str):
     download_name = file_info["original_name"]
 
     return FileResponse(
-        path=file_info["path"],
-        media_type="application/pdf",
-        filename=download_name
+        path=file_info["path"], media_type="application/pdf", filename=download_name
     )
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8502):
     """Start the FastAPI server."""
     import uvicorn
+
     uvicorn.run(app, host=host, port=port)
 
 

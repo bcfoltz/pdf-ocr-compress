@@ -52,8 +52,8 @@ Issues = "https://github.com/bcfoltz/pdf-ocr-compress/issues"
 
 [tool.uv]
 dev-dependencies = [
-    "black>=24.0.0",
-    "isort>=5.13.0",
+    "black>=26.0.0",
+    "isort>=8.0.0",
 ]
 
 [tool.black]

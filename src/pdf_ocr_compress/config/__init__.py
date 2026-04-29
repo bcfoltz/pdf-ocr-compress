@@ -1,25 +1,25 @@
 """Configuration management module."""
 
 from .settings import (
-    AppSettings, 
-    OCRSettings, 
-    CompressionSettings, 
-    UISettings, 
-    SystemSettings,
+    AppSettings,
+    CompressionSettings,
     ConfigManager,
+    OCRSettings,
+    SystemSettings,
+    UISettings,
     get_config,
     save_config,
-    temp_settings
+    temp_settings,
 )
 
 __all__ = [
     "AppSettings",
-    "OCRSettings", 
+    "OCRSettings",
     "CompressionSettings",
     "UISettings",
-    "SystemSettings", 
+    "SystemSettings",
     "ConfigManager",
     "get_config",
     "save_config",
-    "temp_settings"
+    "temp_settings",
 ]

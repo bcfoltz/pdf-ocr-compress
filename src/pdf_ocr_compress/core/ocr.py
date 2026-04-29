@@ -1,21 +1,23 @@
 # ocr.py — ALWAYS writes a brand-new output file
-from pathlib import Path
-from subprocess import run, CalledProcessError
-import time
 import shutil
+import time
+from pathlib import Path
+from subprocess import CalledProcessError, run
 
 from ..config import get_config
-from ..utils.logging_config import get_performance_logger, get_logger
-from ..utils.errors import SystemToolError, PDFProcessingError
+from ..utils.errors import PDFProcessingError, SystemToolError
+from ..utils.logging_config import get_logger, get_performance_logger
 
 logger = get_logger("ocr")
 perf_logger = get_performance_logger("ocr")
+
 
 def _optimize_args(preset: str) -> list[str]:
     levels = {"archival": "0", "balanced": "2", "smallest": "3"}
     if preset not in levels:
         raise ValueError("preset must be one of: archival, balanced, smallest")
     return ["--optimize", levels[preset]]
+
 
 def _unique_output(path: Path, suffix: str = "_ocr") -> Path:
     """
@@ -29,6 +31,7 @@ def _unique_output(path: Path, suffix: str = "_ocr") -> Path:
         i += 1
         out = path.with_name(f"{path.stem}{suffix}_{ts}_{i}{path.suffix}")
     return out
+
 
 def run_ocr(
     input_pdf: Path,
@@ -45,7 +48,7 @@ def run_ocr(
     """
     # Get configuration defaults
     config = get_config()
-    
+
     # Apply defaults from configuration
     if lang is None:
         lang = config.settings.ocr.default_language
@@ -57,7 +60,7 @@ def run_ocr(
         jobs = config.settings.ocr.default_jobs
     if force_ocr is None:
         force_ocr = config.settings.ocr.force_ocr
-    
+
     # Validate inputs
     if not input_pdf.exists():
         raise PDFProcessingError(
@@ -66,11 +69,11 @@ def run_ocr(
             [
                 "Check that the file path is correct",
                 "Ensure the file exists and is accessible",
-                "Try browsing for the file instead of typing the path"
+                "Try browsing for the file instead of typing the path",
             ],
-            "INPUT_FILE_NOT_FOUND"
+            "INPUT_FILE_NOT_FOUND",
         )
-    
+
     # Check if OCRmyPDF is available
     if not shutil.which("ocrmypdf"):
         raise SystemToolError(
@@ -79,30 +82,33 @@ def run_ocr(
             [
                 "Install OCRmyPDF: pip install ocrmypdf",
                 "Ensure OCRmyPDF is in your system PATH",
-                "Verify installation with: ocrmypdf --version"
-            ]
+                "Verify installation with: ocrmypdf --version",
+            ],
         )
-    
+
     # Ensure we write to a fresh file and never to the input
     if output_pdf.exists() or output_pdf.resolve() == input_pdf.resolve():
         output_pdf = _unique_output(output_pdf, suffix="_ocr")
-    
+
     # Log processing start
     perf_logger.log_processing_start(
-        input_pdf, "OCR", 
-        language=lang, preset=preset, jobs=jobs, force_ocr=force_ocr
+        input_pdf, "OCR", language=lang, preset=preset, jobs=jobs, force_ocr=force_ocr
     )
-    
+
     start_time = time.time()
-    
+
     try:
         args = [
             "ocrmypdf",
-            "--output-type", "pdf",
-            "--jobs", str(jobs),
-            "--language", lang,
+            "--output-type",
+            "pdf",
+            "--jobs",
+            str(jobs),
+            "--language",
+            lang,
             "--rotate-pages",
-            "--tesseract-timeout", str(config.settings.ocr.tesseract_timeout),
+            "--tesseract-timeout",
+            str(config.settings.ocr.tesseract_timeout),
         ]
 
         # OCR strategy
@@ -141,18 +147,27 @@ def run_ocr(
         elif result.returncode == 3:
             logger.warning(f"OCR completed with warnings (exit 3): {output_pdf.name}")
             if not output_pdf.exists():
-                raise CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+                raise CalledProcessError(
+                    result.returncode, args, result.stdout, result.stderr
+                )
         else:
             # Other exit codes are genuine errors
-            raise CalledProcessError(result.returncode, args, result.stdout, result.stderr)
+            raise CalledProcessError(
+                result.returncode, args, result.stdout, result.stderr
+            )
 
         if result.stderr:
             logger.debug(f"OCR output: {result.stderr}")
 
         duration = time.time() - start_time
         perf_logger.log_processing_complete(
-            input_pdf, "OCR", duration, output_pdf,
-            language=lang, preset=preset, jobs=jobs
+            input_pdf,
+            "OCR",
+            duration,
+            output_pdf,
+            language=lang,
+            preset=preset,
+            jobs=jobs,
         )
 
         logger.info(f"OCR processing completed in {duration:.1f}s: {output_pdf.name}")
@@ -161,31 +176,31 @@ def run_ocr(
     except CalledProcessError as e:
         duration = time.time() - start_time
         error_msg = f"OCR failed after {duration:.1f}s: {e}"
-        
+
         if e.stderr:
             error_msg += f" - {e.stderr}"
-            
+
         perf_logger.log_processing_error(input_pdf, "OCR", error_msg)
         logger.error(error_msg)
-        
+
         # Clean up failed output
         if output_pdf.exists():
             try:
                 output_pdf.unlink()
             except Exception:
                 pass
-        
+
         # Convert to user-friendly error
         if "tesseract" in str(e).lower():
             raise SystemToolError(
-                "tesseract", 
+                "tesseract",
                 str(e),
                 [
                     "Install Tesseract OCR using the provided installation scripts",
                     "Ensure Tesseract is in your system PATH",
                     f"Check if the language '{lang}' is installed",
-                    "Verify with: tesseract --version"
-                ]
+                    "Verify with: tesseract --version",
+                ],
             )
         else:
             raise PDFProcessingError(
@@ -195,28 +210,28 @@ def run_ocr(
                     "Check that the PDF is not corrupted",
                     "Try with a smaller number of parallel jobs (--jobs 1)",
                     "Ensure you have enough free disk space",
-                    "Check the log files for detailed error information"
-                ]
+                    "Check the log files for detailed error information",
+                ],
             ) from e
-    
+
     except Exception as e:
         duration = time.time() - start_time
         perf_logger.log_processing_error(input_pdf, "OCR", str(e))
         logger.error(f"Unexpected OCR error after {duration:.1f}s: {e}")
-        
+
         # Clean up failed output
         if output_pdf.exists():
             try:
                 output_pdf.unlink()
             except Exception:
                 pass
-                
+
         raise PDFProcessingError(
             f"Unexpected OCR error: {e}",
             f"An unexpected error occurred while processing '{input_pdf.name}'",
             [
-                "Please try again", 
+                "Please try again",
                 "If the problem persists, check the log files",
-                "Consider reporting this issue on GitHub"
-            ]
+                "Consider reporting this issue on GitHub",
+            ],
         ) from e

@@ -1330,8 +1330,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "black", specifier = ">=24.0.0" },
-    { name = "isort", specifier = ">=5.13.0" },
+    { name = "black", specifier = ">=26.0.0" },
+    { name = "isort", specifier = ">=8.0.0" },
 ]
 
 [[package]]
