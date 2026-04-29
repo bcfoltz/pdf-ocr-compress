@@ -126,26 +126,45 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-Modernization pass completed and pushed to `origin/main` as commit `0d85b3b` ("Modernize: drop dead scaffolding, refresh deps, fix pdf-ocr-gui + filename bug"). That commit:
+**Phase 0 complete (2026-04-29).** Benchmarked the tool against two real
+ScanSnap inputs — a 37 MB B&W book (Sample A) and a 4.8 GB color textbook
+(Sample B). Found three pipeline bugs and locked in four design
+invariants. See `BENCHMARKS.md` for the data and `ROADMAP.md` for the
+phased plan that came out of it.
 
-- Deleted ~2,400 lines of dead scaffolding (5 modules — see "Out of scope" below)
-- Replaced the broken `gui/__init__.py` (which imported a nonexistent `simple_first.py`) with a real Streamlit launcher
-- Fixed a bug in `core/compress.py` that double-suffixed output filenames (`sample_a_processed.pdf` → `sample_a_processed_processed.pdf`); Ghostscript now writes to a private `__gs_tmp` intermediate so `linearize()` lands on the user's exact requested path
-- Bumped `requires-python` from `>=3.9` to `>=3.10`, added missing runtime deps (fastapi, uvicorn[standard], python-multipart), bumped floors on ocrmypdf, pikepdf, streamlit, rich
-- Removed dead dev tooling (pytest, pytest-cov, flake8, mypy, pre-commit)
-- Regenerated `uv.lock` with major version bumps: starlette 0.48→1.0, streamlit 1.50→1.57, typer 0.19→0.25, rich 14.1→15.0, uvicorn 0.37→0.46
-- Verified end-to-end on a 37 MB book scan (`Sample A book scan.pdf`) — OCR produced real searchable text
+**Pick up at Phase 1 (Foundation)** — see `ROADMAP.md`. That phase
+covers: rewriting CLAUDE.md framing as a real backend service, a
+greenfield settings rebuild, fixing `_unique_name`'s second-resolution
+collision risk, adding a Ghostscript precheck, and switching the
+Dockerfile to `pip install .`.
 
-No active in-flight task. The next session can start fresh.
+Earlier in this branch (commits `fa81517` through `1428564`) the
+modernization pass and Batches A–E landed: dead-code purge, ruff swap,
+orphan `.ocr.pdf` cleanup, starter `tests/` directory.
 
 ## Known issues / tech debt
 
-- **Output is sometimes larger than input.** The `balanced` preset on a 37 MB book scan produced a 49 MB output because OCRmyPDF adds a text layer and `balanced` doesn't downsample sub-300 DPI images. Not a bug, but counterintuitive — `--preset smallest` has not been benchmarked yet on real book scans.
-- **Orphan `.ocr.pdf` intermediate.** `cli.py:process` appears to leave (or expect) a `.ocr.pdf` file that doesn't show up in the directory after a real run. Possibly OneDrive cleanup, possibly a missing `unlink()`. Not investigated.
-- **Dockerfile pins inline.** `Dockerfile` installs pinned packages with inline `pip install` rather than `pip install .` — it does **not** pick up the `pyproject.toml` dependency floors. Drift risk.
-- **Starlette 1.0 major bump unverified at runtime.** The lock upgrade jumped Starlette 0.48→1.0; the FastAPI server imports cleanly but no API request has been exercised against the new version.
-- **GUI not click-through tested in a browser.** Only the launcher import has been smoke-tested.
-- **No test suite.** There is no `tests/` directory. Smoke tests in this file are the only verification path. Don't add aspirational test infrastructure — either write real tests or leave it alone.
+All slated for Phase 2 (pipeline rethink) — see `ROADMAP.md`.
+
+- **`--force-ocr` produces unusable output.** Verified on Sample A: 11+
+  minutes of Tesseract work followed by the `balanced` Ghostscript pass
+  destroys the OCR text layer (no `/Font` resources on output pages).
+  Drop the post-OCR Ghostscript pass; let OCRmyPDF own optimization.
+- **`needs_ocr` false-positives on pdfminer-strict PDFs.** Verified on
+  Sample B: pdfminer raises `PDFSyntaxError` on a file pikepdf reads
+  fine; `detect.py` catches the exception and returns `True`,
+  triggering a useless multi-hour OCR pass. Switch the existence probe
+  to pikepdf.
+- **Output can exceed input size.** Verified: `archival` triples Sample A
+  (3.07×), `balanced` adds 34%. Pipeline must enforce `output ≤ input`
+  via fallback or passthrough.
+- **Dockerfile pins inline.** Doesn't pick up `pyproject.toml` floors.
+  Drift risk. Phase 1 fix.
+- **Starlette 1.0 major bump unverified at runtime.** Imports cleanly
+  but no `/api/process` request exercised. Phase 4 fix.
+- **GUI not click-through tested in a browser.** Phase 5.
+- **Test suite is minimal.** Two `compress` tests in `tests/`. Phase
+  2/3 add coverage for `needs_ocr`, batch, text-fidelity round-trip.
 
 ## Out of scope
 
