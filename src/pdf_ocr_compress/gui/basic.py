@@ -572,8 +572,14 @@ def main():
             key="batch_in_folder",
         )
         batch_output_folder_str = st.text_input(
-            "Output folder (blank = use default_output_dir, else <input>/processed/)",
-            placeholder="leave blank to follow your settings",
+            "Output folder (optional)",
+            placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
+            help=(
+                "Where processed PDFs go. Leave blank to use your saved "
+                "default output directory (set in the sidebar Defaults "
+                "expander). If you don't have one set either, outputs go "
+                "into a `processed/` subfolder inside the input folder."
+            ),
             key="batch_out_folder",
         )
         try:
