@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -90,13 +90,9 @@ class ConfigManager:
 
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "settings.json"
-        self.profiles_dir = self.config_dir / "profiles"
-        self.cache_dir = self.config_dir / "cache"
 
-        # Ensure directories exist
+        # Ensure directory exists
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._settings = None
 
@@ -131,66 +127,6 @@ class ConfigManager:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         self._settings = settings
-
-    def reset_to_defaults(self):
-        """Reset settings to default values."""
-        self._settings = AppSettings()
-        self.save_settings()
-
-    def get_temp_dir(self) -> Path:
-        """Get temporary directory path."""
-        if self.settings.system.temp_dir:
-            return Path(self.settings.system.temp_dir)
-        return Path.home() / "tmp" / "pdf-ocr-compress"
-
-    def get_cache_dir(self) -> Path:
-        """Get cache directory path."""
-        return self.cache_dir
-
-    def get_log_file(self) -> Path:
-        """Get log file path."""
-        return self.config_dir / "app.log"
-
-    # Profile management
-    def list_profiles(self) -> List[str]:
-        """List available configuration profiles."""
-        if not self.profiles_dir.exists():
-            return []
-        return [p.stem for p in self.profiles_dir.glob("*.json")]
-
-    def save_profile(self, name: str, settings: AppSettings = None):
-        """Save current settings as a named profile."""
-        if settings is None:
-            settings = self.settings
-
-        profile_file = self.profiles_dir / f"{name}.json"
-        data = self._settings_to_dict(settings)
-
-        with open(profile_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-    def load_profile(self, name: str) -> AppSettings:
-        """Load settings from a named profile."""
-        profile_file = self.profiles_dir / f"{name}.json"
-
-        if not profile_file.exists():
-            raise FileNotFoundError(f"Profile '{name}' not found")
-
-        with open(profile_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        return self._dict_to_settings(data)
-
-    def apply_profile(self, name: str):
-        """Load and apply a named profile."""
-        settings = self.load_profile(name)
-        self.save_settings(settings)
-
-    def delete_profile(self, name: str):
-        """Delete a named profile."""
-        profile_file = self.profiles_dir / f"{name}.json"
-        if profile_file.exists():
-            profile_file.unlink()
 
     # Environment variable overrides
     def apply_env_overrides(self):

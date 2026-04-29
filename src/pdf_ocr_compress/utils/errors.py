@@ -216,38 +216,6 @@ def format_error_for_user(error: Exception) -> Tuple[str, list, Optional[str]]:
     )
 
 
-def suggest_system_fixes() -> Dict[str, list]:
-    """Get system-specific fix suggestions."""
-    fixes = {
-        "general": [
-            "Restart the application",
-            "Check that all system dependencies are installed",
-            "Verify that Tesseract OCR and Ghostscript are in your PATH",
-        ]
-    }
-
-    if sys.platform == "win32":
-        fixes["windows"] = [
-            "Run PowerShell as Administrator",
-            "Check Windows Defender hasn't blocked the tools",
-            "Ensure PATH environment variable includes tool directories",
-        ]
-    elif sys.platform == "darwin":
-        fixes["macos"] = [
-            "Check Homebrew installations: brew doctor",
-            "Verify Xcode Command Line Tools are installed",
-            "Check file permissions with: ls -la",
-        ]
-    else:
-        fixes["linux"] = [
-            "Update package manager: sudo apt update (Ubuntu/Debian)",
-            "Check tool installations: which tesseract && which gs",
-            "Verify file permissions and ownership",
-        ]
-
-    return fixes
-
-
 def create_error_report(error: Exception, context: dict = None) -> dict:
     """Create a detailed error report for debugging."""
     user_msg, suggestions, error_code = format_error_for_user(error)

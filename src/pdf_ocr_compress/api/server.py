@@ -1,16 +1,14 @@
 """FastAPI server for PDF OCR + Compression REST API."""
 
-import os
 import shutil
 import tempfile
 import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..core.compress import compress as run_compress
@@ -44,13 +42,6 @@ class ProcessResponse(BaseModel):
     output_size: int
     reduction_percent: float
     processing_time: float
-
-
-class ErrorResponse(BaseModel):
-    """Error response model."""
-
-    status: str
-    error: str
 
 
 def cleanup_old_files():

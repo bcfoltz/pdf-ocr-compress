@@ -109,32 +109,6 @@ class PerformanceLogger:
             },
         )
 
-    def log_batch_complete(
-        self,
-        total_files: int,
-        successful_files: int,
-        failed_files: int,
-        duration: float,
-        success_rate: float,
-        **kwargs,
-    ):
-        """Log completion of batch processing operation."""
-        self.logger.info(
-            f"Batch processing completed: {successful_files}/{total_files} files in {duration:.1f}s",
-            extra={
-                "extra_data": {
-                    "event_type": "batch_complete",
-                    "total_files": total_files,
-                    "successful_files": successful_files,
-                    "failed_files": failed_files,
-                    "duration_seconds": duration,
-                    "success_rate": success_rate,
-                    **kwargs,
-                }
-            },
-        )
-
-
 def setup_logging(
     log_level: str = "INFO", log_file: Path = None, structured_logging: bool = True
 ) -> logging.Logger:
