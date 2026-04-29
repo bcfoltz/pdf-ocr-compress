@@ -608,8 +608,12 @@ def main():
             batch_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_batch_"))
             batch_in = batch_workdir / "input"
             batch_in.mkdir()
-            for uf in batch_uploads:
-                _chunk_copy(uf, batch_in / uf.name)
+            try:
+                for uf in batch_uploads:
+                    _chunk_copy(uf, batch_in / uf.name)
+            except OSError as e:
+                _render_error(e)
+                st.stop()
 
             out_dir, out_source = _resolve_output_dir(
                 cfg,
@@ -709,7 +713,7 @@ def main():
         # Per-file download buttons (upload mode only — outputs already on
         # disk where the user pointed in folder mode).
         if batch_source == "Upload multiple PDFs in browser":
-            for r in report.results:
+            for i, r in enumerate(report.results):
                 if (
                     r.status == "ok"
                     and r.output_path is not None
@@ -721,7 +725,7 @@ def main():
                             data=f.read(),
                             file_name=r.output_path.name,
                             mime="application/pdf",
-                            key=f"dl_{r.input_path.name}",
+                            key=f"dl_{i}_{r.input_path.name}",
                         )
 
         # Batch report download (every mode)

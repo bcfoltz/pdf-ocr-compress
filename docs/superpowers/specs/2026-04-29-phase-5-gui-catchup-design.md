@@ -25,11 +25,19 @@ change one, update this section and re-run review.
 1. **One file, no second GUI module.** `gui/basic.py` stays the only
    GUI file; new logic lives in private functions inside it
    (`_render_defaults_panel`, `_collect_local_folder_inputs`,
-   `_resolve_output_dir`, `_render_error`). Rationale: CLAUDE.md "Out
-   of scope" explicitly bans a second GUI file (`simple_first.py`
-   precedent). Estimated final size ~550 lines, comfortable for a
-   single-page Streamlit app. If it ever crosses ~700 lines, extract a
-   `gui/_components.py` then — not now.
+   `_resolve_output_dir`, `_render_error`, `_timestamped_batch_subdir`).
+   Rationale: CLAUDE.md "Out of scope" explicitly bans a second GUI
+   file (`simple_first.py` precedent). Estimated final size was
+   ~550 lines; actual landing was ~745 lines, modestly over the
+   provisional ~700-line extraction trigger. Decision (2026-04-29):
+   keep everything in `gui/basic.py` for Phase 5 since the extra
+   length is concentrated in straight-line `main()` flow (UI widget
+   declarations + control-flow branches) rather than tangled helpers,
+   and extracting a `gui/_components.py` immediately before the first-
+   ever browser smoke test would add structural churn for no
+   functional benefit. Re-evaluate the extraction trigger when (a)
+   the file exceeds ~900 lines, or (b) Phase 6/follow-ups force
+   another set of `main()` edits.
 2. **Settings UI = sidebar Defaults expander, collapsed by default.**
    Single-page app; no Streamlit `pages/` multi-page nav. Per-run
    sidebar widgets pre-fill from saved defaults but stay session-
