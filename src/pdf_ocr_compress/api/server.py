@@ -2,7 +2,6 @@
 
 import shutil
 import tempfile
-import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,9 +10,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..core.compress import compress as run_compress
-from ..core.detect import needs_ocr
-from ..core.ocr import run_ocr
+from ..core.pipeline import run_pipeline
 
 app = FastAPI(
     title="PDF OCR + Compression API",
@@ -31,17 +28,32 @@ file_storage = {}
 
 
 class ProcessResponse(BaseModel):
-    """Response model for /api/process endpoint."""
+    """Response model for /api/process endpoint.
+
+    Phase 2 item 4 added the lower block of fields (ocr_ran,
+    ocr_skipped_reason, preset_actually_used, pdfminer_text_extractable,
+    pct_change). The original block (original_size / output_size /
+    reduction_percent / processing_time) is kept for backward
+    compatibility with existing API consumers — they describe the same
+    operation, just under the legacy field names.
+    """
 
     status: str
     message: str
     file_id: str
     mode: str
-    preset: str
+    preset: str  # the requested preset
     original_size: int
     output_size: int
-    reduction_percent: float
+    reduction_percent: float  # positive = output is smaller
     processing_time: float
+
+    # Phase 2 item 4 — structured operation report
+    ocr_ran: bool
+    ocr_skipped_reason: str | None
+    preset_actually_used: str  # may differ from `preset` if oversize fallback fired
+    pdfminer_text_extractable: bool
+    pct_change: float  # negative = output shrunk; positive = output grew
 
 
 def cleanup_old_files():
@@ -121,64 +133,28 @@ async def process_pdf(
     input_path = workdir / "input.pdf"
     output_base = workdir / "output.pdf"
 
-    start_time = time.time()
-
     try:
         # Save uploaded file
         with open(input_path, "wb") as f:
             content = await file.read()
             f.write(content)
 
-        original_size = input_path.stat().st_size
-
-        # Detect if OCR is needed
-        need_ocr = False
-        if mode == "auto":
-            try:
-                need_ocr = needs_ocr(input_path)
-            except Exception:
-                need_ocr = True
-
-        # Process based on mode
-        if mode == "ocr":
-            output_path = run_ocr(
-                input_pdf=input_path,
-                output_pdf=output_base,
-                lang=language,
-                preset=preset,
-                pdfa=pdfa,
-                jobs=jobs,
-                force_ocr=force_ocr,
-            )
-
-        elif mode == "compress":
-            output_path = run_compress(input_path, output_base, preset=preset)
-
-        else:  # auto
-            if force_ocr or need_ocr:
-                # OCRmyPDF owns optimization here via --optimize N keyed off
-                # preset (archival=0, balanced=2, smallest=3). A post-OCR
-                # Ghostscript pass would strip the /Font resources OCRmyPDF
-                # just wrote — see Design rule #3 in CLAUDE.md.
-                output_path = run_ocr(
-                    input_pdf=input_path,
-                    output_pdf=output_base,
-                    lang=language,
-                    preset=preset,
-                    pdfa=pdfa,
-                    jobs=jobs,
-                    force_ocr=True,
-                )
-            else:
-                output_path = run_compress(input_path, output_base, preset=preset)
-
-        output_size = output_path.stat().st_size
-        processing_time = time.time() - start_time
-        reduction_percent = 100.0 * (1 - output_size / max(original_size, 1))
+        # Run the unified pipeline; it builds the structured ProcessResult
+        # report we surface in the response.
+        result = run_pipeline(
+            input_path,
+            output_base,
+            mode=mode,
+            lang=language,
+            preset=preset,
+            pdfa=pdfa,
+            jobs=jobs,
+            force_ocr=force_ocr,
+        )
 
         # Store file info
         file_storage[file_id] = {
-            "path": output_path,
+            "path": result.output_path,
             "workdir": workdir,
             "timestamp": datetime.now(),
             "original_name": file.filename,
@@ -186,16 +162,25 @@ async def process_pdf(
             "preset": preset,
         }
 
+        # reduction_percent uses the inverse-sign convention of pct_change
+        # (positive when output shrank); kept for API backward compat.
+        reduction_percent = -result.pct_change
+
         return ProcessResponse(
             status="success",
             message="Processing complete",
             file_id=file_id,
             mode=mode,
             preset=preset,
-            original_size=original_size,
-            output_size=output_size,
+            original_size=result.input_bytes,
+            output_size=result.output_bytes,
             reduction_percent=round(reduction_percent, 2),
-            processing_time=round(processing_time, 2),
+            processing_time=round(result.processing_seconds, 2),
+            ocr_ran=result.ocr_ran,
+            ocr_skipped_reason=result.ocr_skipped_reason,
+            preset_actually_used=result.preset_actually_used,
+            pdfminer_text_extractable=result.pdfminer_text_extractable,
+            pct_change=round(result.pct_change, 2),
         )
 
     except Exception as e:
