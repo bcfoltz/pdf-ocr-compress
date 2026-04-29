@@ -1,10 +1,12 @@
 # compress.py — ALWAYS writes a brand-new file; never in-place
 import shutil
-import time
 from pathlib import Path
 from subprocess import CalledProcessError, run
 
 import pikepdf
+
+from ..utils.errors import SystemToolError
+from ..utils.file_utils import unique_output_path
 
 
 def _gs_exe() -> str:
@@ -12,7 +14,10 @@ def _gs_exe() -> str:
         exe = shutil.which(name)
         if exe:
             return exe
-    return "gswin64c"
+    raise SystemToolError(
+        "ghostscript",
+        "Ghostscript not found in PATH (looked for gswin64c, gswin32c, gs)",
+    )
 
 
 def _gs_args_for_preset(preset: str) -> list[str]:
@@ -51,17 +56,6 @@ def _gs_args_for_preset(preset: str) -> list[str]:
     raise ValueError("preset must be one of: archival, balanced, smallest")
 
 
-def _unique_name(base: Path, suffix: str = "_processed") -> Path:
-    """Return a non-existing path next to base with timestamp to avoid collisions."""
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    cand = base.with_name(f"{base.stem}{suffix}_{ts}.pdf")
-    i = 0
-    while cand.exists():
-        i += 1
-        cand = base.with_name(f"{base.stem}{suffix}_{ts}_{i}.pdf")
-    return cand
-
-
 def ghostscript_compress(
     input_pdf: Path, output_pdf: Path, preset: str = "balanced"
 ) -> Path:
@@ -71,7 +65,7 @@ def ghostscript_compress(
     """
     # Ensure target is not the input and does not exist
     if output_pdf.resolve() == input_pdf.resolve() or output_pdf.exists():
-        output_pdf = _unique_name(output_pdf)
+        output_pdf = unique_output_path(output_pdf)
 
     args = [
         _gs_exe(),
@@ -97,7 +91,7 @@ def linearize(src: Path, dst: Path) -> Path:
     Returns dst.
     """
     if dst.exists() or dst.resolve() == src.resolve():
-        dst = _unique_name(dst, suffix="_linearized")
+        dst = unique_output_path(dst, suffix="_linearized")
     with pikepdf.open(src) as pdf:
         pdf.save(dst, linearize=True)
     return dst
@@ -111,12 +105,12 @@ def compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Pat
     """
     # Resolve the final output path up front so the user's chosen name is honored.
     if output_pdf.resolve() == input_pdf.resolve() or output_pdf.exists():
-        output_pdf = _unique_name(output_pdf)
+        output_pdf = unique_output_path(output_pdf)
 
     # 1) Ghostscript writes to a private intermediate so we can linearize into the final path.
     gs_tmp = output_pdf.with_name(output_pdf.stem + "__gs_tmp" + output_pdf.suffix)
     if gs_tmp.exists():
-        gs_tmp = _unique_name(gs_tmp, suffix="__gs_tmp")
+        gs_tmp = unique_output_path(gs_tmp, suffix="__gs_tmp")
     gs_out = ghostscript_compress(input_pdf, gs_tmp, preset=preset)
 
     # 2) Linearize into the user's chosen final path.

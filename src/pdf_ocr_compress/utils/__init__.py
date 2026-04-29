@@ -9,11 +9,7 @@ from .errors import (
     create_error_report,
     format_error_for_user,
 )
-from .file_utils import (
-    human_readable_size,
-    safe_file_operation,
-    unique_output_path,
-)
+from .file_utils import human_readable_size, unique_output_path
 from .logging_config import (
     get_logger,
     get_performance_logger,
@@ -35,5 +31,4 @@ __all__ = [
     "create_error_report",
     "unique_output_path",
     "human_readable_size",
-    "safe_file_operation",
 ]

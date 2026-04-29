@@ -6,6 +6,7 @@ from subprocess import CalledProcessError, run
 
 from ..config import get_config
 from ..utils.errors import PDFProcessingError, SystemToolError
+from ..utils.file_utils import unique_output_path
 from ..utils.logging_config import get_logger, get_performance_logger
 
 logger = get_logger("ocr")
@@ -17,20 +18,6 @@ def _optimize_args(preset: str) -> list[str]:
     if preset not in levels:
         raise ValueError("preset must be one of: archival, balanced, smallest")
     return ["--optimize", levels[preset]]
-
-
-def _unique_output(path: Path, suffix: str = "_ocr") -> Path:
-    """
-    If the suggested output exists or equals the input, add a timestamped suffix.
-    """
-    ts = time.strftime("%Y%m%d-%H%M%S")
-    base = path.with_name(f"{path.stem}{suffix}_{ts}{path.suffix}")
-    i = 0
-    out = base
-    while out.exists():
-        i += 1
-        out = path.with_name(f"{path.stem}{suffix}_{ts}_{i}{path.suffix}")
-    return out
 
 
 def run_ocr(
@@ -47,19 +34,19 @@ def run_ocr(
     Never writes in place; never overwrites existing files.
     """
     # Get configuration defaults
-    config = get_config()
+    settings = get_config().settings
 
     # Apply defaults from configuration
     if lang is None:
-        lang = config.settings.ocr.default_language
+        lang = settings.default_language
     if preset is None:
-        preset = config.settings.compression.default_preset
+        preset = settings.default_preset
     if pdfa is None:
         pdfa = False
     if jobs is None:
-        jobs = config.settings.ocr.default_jobs
+        jobs = settings.default_jobs
     if force_ocr is None:
-        force_ocr = config.settings.ocr.force_ocr
+        force_ocr = False
 
     # Validate inputs
     if not input_pdf.exists():
@@ -88,7 +75,7 @@ def run_ocr(
 
     # Ensure we write to a fresh file and never to the input
     if output_pdf.exists() or output_pdf.resolve() == input_pdf.resolve():
-        output_pdf = _unique_output(output_pdf, suffix="_ocr")
+        output_pdf = unique_output_path(output_pdf, suffix="_ocr")
 
     # Log processing start
     perf_logger.log_processing_start(
@@ -108,7 +95,7 @@ def run_ocr(
             lang,
             "--rotate-pages",
             "--tesseract-timeout",
-            str(config.settings.ocr.tesseract_timeout),
+            str(settings.tesseract_timeout),
         ]
 
         # OCR strategy

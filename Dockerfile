@@ -10,24 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies (only essentials)
-COPY requirements.txt .
-RUN pip install --no-cache-dir \
-    ocrmypdf>=15.0.0 \
-    pikepdf>=8.0.0 \
-    pdfminer.six>=20221105 \
-    typer>=0.12.0 \
-    rich>=13.0.0 \
-    streamlit>=1.32.0 \
-    fastapi>=0.104.0 \
-    uvicorn>=0.24.0 \
-    python-multipart>=0.0.6
-
-# Copy application source code
+# Install Python deps from pyproject.toml so the image picks up version
+# floors maintained in one place. README.md is required because pyproject
+# references it as `readme`.
+COPY pyproject.toml README.md ./
 COPY src/ ./src/
+RUN pip install --no-cache-dir .
+
 COPY .streamlit/ ./.streamlit/
 COPY start_services.sh .
 RUN chmod +x start_services.sh
@@ -40,12 +31,11 @@ ENV STREAMLIT_SERVER_PORT=8501 \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
-    STREAMLIT_BROWSER_SERVER_ADDRESS=localhost \
-    PYTHONPATH=/app/src
+    STREAMLIT_BROWSER_SERVER_ADDRESS=localhost
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
 
 # Run both Streamlit GUI and FastAPI server
-CMD ["bash", "-c", "streamlit run src/pdf_ocr_compress/gui/basic.py & python -m uvicorn pdf_ocr_compress.api.server:app --host 0.0.0.0 --port 8502 & wait"]
+CMD ["bash", "-c", "streamlit run /app/src/pdf_ocr_compress/gui/basic.py & python -m uvicorn pdf_ocr_compress.api.server:app --host 0.0.0.0 --port 8502 & wait"]

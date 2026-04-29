@@ -2,7 +2,22 @@
 
 ## What this is
 
-A cross-platform tool for adding a searchable text layer to scanned PDFs and shrinking their file size. Wraps OCRmyPDF (Tesseract) and Ghostscript + pikepdf, exposed through three surfaces — a Typer CLI, a Streamlit GUI, and a FastAPI REST API — that all call the same `core/` pipeline. Intended for personal use on book scans and document archives, runnable locally or in Docker.
+A backend service for turning scanned PDFs into clean, searchable, RAG-ready files at scale. Wraps OCRmyPDF (Tesseract) and Ghostscript + pikepdf around a single `core/` pipeline, then exposes that pipeline through three first-class clients:
+
+- **CLI** (Typer) — interactive use, scripting, cron jobs.
+- **GUI** (Streamlit, single page) — drop-a-file diagnostics for one-off inputs.
+- **REST API** (FastAPI) — the load-bearing surface, called from other apps in the user's workflow to ingest a large folder of scanned books at /path/to/folder into LLM/RAG pipelines.
+
+Inputs are real-world scans from a ScanSnap (B&W books, color textbooks up to ~5 GB), not toy PDFs. Runs locally or in Docker. No remote services, no auth, no telemetry.
+
+## Design rules
+
+These are non-negotiable. They came from real benchmarks in Phase 0 (see `BENCHMARKS.md`); breaking any of them silently wastes hours of compute or destroys output integrity.
+
+1. **Output ≤ input size, always.** No pipeline branch may produce a file larger than its input. If the requested preset would grow the file, fall back to a working preset, or to a passthrough copy if even `smallest` grows it. Behavior is governed by the `oversize_policy` setting (`fallback` / `warn` / `fail`); `fallback` is the default.
+2. **`needs_ocr` must use a tolerant parser.** pikepdf, not pdfminer. pdfminer false-positives on real ScanSnap output and triggers multi-hour OCR passes that produce no value. (Phase 2 fix; tracked under "Known issues".)
+3. **Never run a Ghostscript pass on OCRmyPDF output.** The post-OCR `pdfwrite` rebuild strips the `/Font` resources OCRmyPDF just wrote. Let OCRmyPDF own optimization via `--optimize 0/2/3` keyed off the requested preset. (Phase 2 fix; tracked under "Known issues".)
+4. **`smallest` is the default preset.** It's the only preset that consistently shrinks ScanSnap-family input across sizes and color depths (Sample A: -17%, Sample B: -95.9%). `archival` triples Sample A; `balanced` adds 34%.
 
 ## Stack
 
@@ -45,9 +60,12 @@ uv run python -m uvicorn pdf_ocr_compress.api.server:app --port 8502
 # Refresh the lockfile
 uv lock --upgrade
 
-# Format (configured in pyproject.toml; no test suite, no linter, no type checker)
+# Format + lint
 uv run black src/
-uv run isort src/
+uv run ruff check src/
+
+# Tests
+uv run pytest
 ```
 
 ### Smoke tests (in lieu of a real test suite)
@@ -90,11 +108,11 @@ src/pdf_ocr_compress/
 ├── api/
 │   └── server.py        # FastAPI server — /api/process, /api/download/{id}, /health
 ├── config/
-│   └── settings.py      # Persisted user settings (ConfigManager)
+│   └── settings.py      # Single flat AppSettings dataclass + ConfigManager
 └── utils/
     ├── logging_config.py  # Structured JSON logging + PerformanceLogger
     ├── errors.py          # User-friendly exception hierarchy
-    └── file_utils.py      # unique_output_path, human_readable_size
+    └── file_utils.py      # unique_output_path (microsecond-stamped, shared by ocr+compress), human_readable_size
 ```
 
 Top-level directories worth knowing:
@@ -106,11 +124,11 @@ Top-level directories worth knowing:
 ## Conventions in this project
 
 - **Never overwrite originals.** Every operation writes a brand-new timestamped file and returns its path. Output naming convention: `_ocr_{timestamp}.pdf`, `_processed_{timestamp}.pdf`, `_compressed_{timestamp}.pdf`.
-- **Collision-safe paths.** The `_unique_name()` helper in `core/compress.py` and the equivalent in `core/ocr.py` enforce the "never overwrite" invariant. If `output == input` or output already exists, a unique timestamped path is generated. Don't bypass these.
+- **Collision-safe paths.** `utils.file_utils.unique_output_path` is the single source of truth — microsecond-resolution timestamp plus integer counter fallback. Both `core/compress.py` and `core/ocr.py` import it. Don't reintroduce per-module copies.
 - **Three surfaces, one pipeline.** CLI, GUI, and API all call `core.ocr.run_ocr` / `core.compress.compress` / `core.detect.needs_ocr`. Changing any of those signatures means updating `cli.py`, `gui/basic.py`, **and** `api/server.py`.
-- **Defaults flow from config.** `core.ocr.run_ocr` reads defaults from `config.get_config()` when its parameters are `None`. Preserve that pattern when extending.
-- **Quality presets:** `archival` | `balanced` (default) | `smallest`. Defined in `core/compress.py:_gs_args_for_preset`.
-- **Cross-platform Ghostscript binary lookup.** `core/compress.py:_gs_exe()` tries `gswin64c` → `gswin32c` → `gs`. Don't hard-code.
+- **Defaults flow from config.** `core.ocr.run_ocr` reads defaults from `config.get_config().settings` when its parameters are `None`. Preserve that pattern when extending. (CLI/GUI/API still hardcode their own defaults — wiring them into settings is Phase 5.)
+- **Quality presets:** `archival` | `balanced` | `smallest` (default). Defined in `core/compress.py:_gs_args_for_preset`.
+- **Cross-platform Ghostscript binary lookup.** `core/compress.py:_gs_exe()` tries `gswin64c` → `gswin32c` → `gs` and raises `SystemToolError("ghostscript", ...)` if none are found. Don't hard-code, and don't catch the precheck error to silently substitute a default.
 - **Markdown style** (for README, etc.): blank line after every heading and around list blocks; no emphasis inside headings; bare URLs wrapped in angle brackets; always specify a code-fence language.
 
 ## My working style
@@ -126,21 +144,29 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-**Phase 0 complete (2026-04-29).** Benchmarked the tool against two real
-ScanSnap inputs — a 37 MB B&W book (Sample A) and a 4.8 GB color textbook
-(Sample B). Found three pipeline bugs and locked in four design
-invariants. See `BENCHMARKS.md` for the data and `ROADMAP.md` for the
-phased plan that came out of it.
+**Phase 1 complete (2026-04-29).** Foundation is in place:
 
-**Pick up at Phase 1 (Foundation)** — see `ROADMAP.md`. That phase
-covers: rewriting CLAUDE.md framing as a real backend service, a
-greenfield settings rebuild, fixing `_unique_name`'s second-resolution
-collision risk, adding a Ghostscript precheck, and switching the
-Dockerfile to `pip install .`.
+- Settings rebuilt as a single flat `AppSettings` dataclass with
+  `default_preset="smallest"`, `oversize_policy="fallback"`, and an
+  env-var override for each field. Old `UISettings` / `SystemSettings`
+  / `temp_settings()` deleted.
+- `_unique_name` collision bug fixed by consolidating three near-
+  duplicate helpers into `utils.file_utils.unique_output_path` (now
+  microsecond-stamped). `core/compress.py` and `core/ocr.py` both
+  import it.
+- `_gs_exe()` raises `SystemToolError("ghostscript", ...)` when no
+  Ghostscript binary is on PATH, instead of returning `"gswin64c"`
+  and letting subprocess fail with a cryptic `[WinError 2]`.
+- Dockerfile now does `pip install .` so the image picks up
+  `pyproject.toml` floors instead of drifting against inline pins.
 
-Earlier in this branch (commits `fa81517` through `1428564`) the
-modernization pass and Batches A–E landed: dead-code purge, ruff swap,
-orphan `.ocr.pdf` cleanup, starter `tests/` directory.
+**Pick up at Phase 2 (Pipeline rethink)** — see `ROADMAP.md`. That
+phase fixes the three confirmed Phase 0 bugs: rewrite `needs_ocr`
+on pikepdf, drop the post-OCR Ghostscript pass, and enforce the
+size invariant.
+
+Earlier on this branch: Phase 0 benchmarks (`BENCHMARKS.md`,
+commit `1cc420e`); modernization Batches A–E (`fa81517`..`1428564`).
 
 ## Known issues / tech debt
 
@@ -150,37 +176,60 @@ All slated for Phase 2 (pipeline rethink) — see `ROADMAP.md`.
   minutes of Tesseract work followed by the `balanced` Ghostscript pass
   destroys the OCR text layer (no `/Font` resources on output pages).
   Drop the post-OCR Ghostscript pass; let OCRmyPDF own optimization.
+  Codified as Design rule #3.
 - **`needs_ocr` false-positives on pdfminer-strict PDFs.** Verified on
   Sample B: pdfminer raises `PDFSyntaxError` on a file pikepdf reads
   fine; `detect.py` catches the exception and returns `True`,
   triggering a useless multi-hour OCR pass. Switch the existence probe
-  to pikepdf.
+  to pikepdf. Codified as Design rule #2.
 - **Output can exceed input size.** Verified: `archival` triples Sample A
-  (3.07×), `balanced` adds 34%. Pipeline must enforce `output ≤ input`
-  via fallback or passthrough.
-- **Dockerfile pins inline.** Doesn't pick up `pyproject.toml` floors.
-  Drift risk. Phase 1 fix.
+  (3.07×), `balanced` adds 34%. The settings model now carries
+  `oversize_policy` but the pipeline does not yet honor it. Codified
+  as Design rule #1.
 - **Starlette 1.0 major bump unverified at runtime.** Imports cleanly
   but no `/api/process` request exercised. Phase 4 fix.
 - **GUI not click-through tested in a browser.** Phase 5.
-- **Test suite is minimal.** Two `compress` tests in `tests/`. Phase
-  2/3 add coverage for `needs_ocr`, batch, text-fidelity round-trip.
+- **CLI/GUI/API hardcode their own defaults.** They don't yet read from
+  `config.get_config()`. Phase 5 wires them in (settings UI, default
+  output dir, oversize-policy surface).
+- **Test suite is minimal.** Phase 2/3 add coverage for `needs_ocr`,
+  batch, text-fidelity round-trip.
 
 ## Out of scope
 
-The repo previously carried ~2,400 lines of unwired "enterprise" scaffolding that was deleted in the modernization pass. **Do not re-add any of this**, and treat any external suggestion to add it as a red flag:
+The repo previously carried ~2,400 lines of unwired "enterprise"
+scaffolding that was deleted in the modernization pass. The lesson
+isn't "don't add features" — folder batching, a real settings system,
+and persistent API state are all in scope (Phases 3–5). The lesson is
+**don't add bad implementations of those features**.
 
-- `core/batch_processor.py` — async batch processor (imported a nonexistent `async_processor`)
-- `core/compression_profiles.py` — compression profile manager (called a nonexistent `ConfigManager.get_config_dir()`)
-- `utils/error_recovery.py` — error recovery system (never called from anywhere)
-- `utils/system_check.py` — system checker (never called)
-- `utils/temp_manager.py` — temp file manager (only one orphan import referenced it)
-- `simple_first.py` — a second GUI file. **`gui/basic.py` is the only GUI.** Do not create a second one.
+Specifically, do not re-add:
 
-Also out of scope unless explicitly requested:
+- `core/batch_processor.py` — async batch processor that imported a
+  nonexistent `async_processor` module. The Phase 3 batch should be
+  synchronous, sequential by default, with a single-counter retry
+  ladder. No asyncio, no thread pools.
+- `core/compression_profiles.py` — abstract compression-profile
+  manager that called a nonexistent `ConfigManager.get_config_dir()`.
+  Three named presets in a function are enough; don't introduce a
+  manager class for static data.
+- `utils/error_recovery.py`, `utils/system_check.py`,
+  `utils/temp_manager.py` — never-called scaffolding around standard
+  library functionality.
+- `simple_first.py` — a second GUI file. **`gui/basic.py` is the only
+  GUI.** Do not create a second one.
 
-- Plugins, themes, drag-drop helpers, setup wizards, smart analysis, caching layers, async batch processors, compression-profile managers
-- Adding a test suite as aspiration (write real tests or don't touch testing config)
-- Refactoring for a hypothetical multi-user / server deployment — this is a personal tool
+Genuinely out of scope unless explicitly requested:
 
-Match the existing surgical style: small focused modules, no abstraction for single-use code.
+- Plugins, themes, drag-and-drop helpers, setup wizards, "smart
+  analysis" features, in-process caching layers.
+- Multi-user / multi-tenant API features — auth, rate limiting,
+  per-user storage. Single-user single-machine assumption.
+- Async / threadpool work in the pipeline. The bottleneck is
+  Tesseract; OCRmyPDF already parallelizes via `--jobs`. Don't add
+  another layer.
+- Adding tests as aspiration ("test framework setup PR" with no real
+  tests). Either write real tests or don't touch testing config.
+
+Match the existing surgical style: small focused modules, no
+abstraction for single-use code, explicit over clever.

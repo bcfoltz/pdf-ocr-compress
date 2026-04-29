@@ -1,22 +1,18 @@
 """Utility functions for file handling and operations."""
 
-import time
+from datetime import datetime
 from pathlib import Path
 
 
 def unique_output_path(base_path: str | Path, suffix: str = "_processed") -> Path:
-    """
-    Generate a unique output path to prevent overwrites.
+    """Return a non-existing sibling of base_path stamped with the current time.
 
-    Args:
-        base_path: Base file path
-        suffix: Suffix to add before timestamp
-
-    Returns:
-        Unique path that doesn't exist
+    Microsecond-resolution timestamp (`%Y%m%d-%H%M%S-%f`) keeps rapid back-to-back
+    calls collision-free; an integer counter handles the impossible-but-cheap
+    same-microsecond case. Preserves the original file extension.
     """
     base_path = Path(base_path)
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     candidate = base_path.with_name(
         f"{base_path.stem}{suffix}_{timestamp}{base_path.suffix}"
     )
@@ -32,41 +28,9 @@ def unique_output_path(base_path: str | Path, suffix: str = "_processed") -> Pat
 
 
 def human_readable_size(nbytes: int) -> str:
-    """
-    Convert bytes to human readable format.
-
-    Args:
-        nbytes: Number of bytes
-
-    Returns:
-        Human readable size string
-    """
+    """Convert a byte count to a human-readable string."""
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if nbytes < 1024 or unit == "TB":
             return f"{nbytes:.1f} {unit}" if unit != "B" else f"{nbytes} {unit}"
         nbytes /= 1024
     return f"{nbytes:.1f} TB"
-
-
-def safe_file_operation(func):
-    """
-    Decorator to safely handle file operations with proper error handling.
-
-    Args:
-        func: Function to wrap
-
-    Returns:
-        Wrapped function with error handling
-    """
-
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except FileNotFoundError as e:
-            raise RuntimeError(f"File not found: {e}") from e
-        except PermissionError as e:
-            raise RuntimeError(f"Permission denied: {e}") from e
-        except OSError as e:
-            raise RuntimeError(f"File operation failed: {e}") from e
-
-    return wrapper
