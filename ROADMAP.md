@@ -18,7 +18,7 @@ work, gated on the prior one. Pick up at the next non-completed phase.
 
 These are non-negotiable constraints for everything that follows. They
 came from real-input benchmarks on a 38 MB B&W book scan (Sample A) and a
-4.8 GB color textbook (Sample B) — both from a ScanSnap.
+4.8 GB color textbook scan (Sample B) — both already-OCR'd scanner output.
 
 1. **Output ≤ input size, always.** No pipeline branch may produce
    output larger than input. If the requested preset would grow the
@@ -195,7 +195,7 @@ handling. This is the user's primary stated workflow.
 
 **Success criteria:**
 
-- `pdf-ocr batch G:/My\ Drive/Book\ Scans/` runs end-to-end with
+- `pdf-ocr batch /path/to/folder/` runs end-to-end with
   size summary at end and `batch_report.json` written.
 - One bad PDF in the middle of a batch doesn't kill the rest.
 - API can be hit with a multi-file POST and returns a job_id.
@@ -262,8 +262,8 @@ sessions).
 
 **Work items:**
 
-- README rewrite reflecting the badass tool, not the demo. Include the
-  Sample B headline number (4.8 GB → 198 MB).
+- README rewrite reflecting what the tool actually does, not the
+  demo. Include the Sample B headline number (4.8 GB → 198 MB).
 - API examples doc with curl + Python `requests` snippets for each
   endpoint.
 - Document `--pdfa` option for archival use case.

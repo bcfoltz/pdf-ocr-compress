@@ -188,6 +188,8 @@ Thumbs.db
 
 # Personal / draft content not for the repo
 LINKEDIN.md
+CLAUDE.local.md
+.claude/settings.local.json
 
 # Benchmark output artifacts (pdfs/ scripts are committed; their results aren't)
 pdfs/*.json

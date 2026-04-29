@@ -6,18 +6,18 @@ A backend service for turning scanned PDFs into clean, searchable, RAG-ready fil
 
 - **CLI** (Typer) — interactive use, scripting, cron jobs.
 - **GUI** (Streamlit, single page) — drop-a-file diagnostics for one-off inputs.
-- **REST API** (FastAPI) — the load-bearing surface, called from other apps in the user's workflow to ingest a large folder of scanned books at /path/to/folder into LLM/RAG pipelines.
+- **REST API** (FastAPI) — the load-bearing surface, intended to be called from other apps that ingest large folders of scanned books into LLM/RAG pipelines.
 
-Inputs are real-world scans from a ScanSnap (B&W books, color textbooks up to ~5 GB), not toy PDFs. Runs locally or in Docker. No remote services, no auth, no telemetry.
+Designed for real-world scanner output (B&W book scans through multi-GB color textbook scans), not toy PDFs. Runs locally or in Docker. No remote services, no auth, no telemetry.
 
 ## Design rules
 
 These are non-negotiable. They came from real benchmarks in Phase 0 (see `BENCHMARKS.md`); breaking any of them silently wastes hours of compute or destroys output integrity.
 
 1. **Output ≤ input size, always.** No pipeline branch may produce a file larger than its input. If the requested preset would grow the file, fall back to a working preset, or to a passthrough copy if even `smallest` grows it. Behavior is governed by the `oversize_policy` setting (`fallback` / `warn` / `fail`); `fallback` is the default.
-2. **`needs_ocr` must use a tolerant parser.** pikepdf, not pdfminer. pdfminer false-positives on real ScanSnap output and triggers multi-hour OCR passes that produce no value. (Phase 2 fix; tracked under "Known issues".)
+2. **`needs_ocr` must use a tolerant parser.** pikepdf, not pdfminer. pdfminer false-positives on real scanner output and triggers multi-hour OCR passes that produce no value. (Phase 2 fix; tracked under "Known issues".)
 3. **Never run a Ghostscript pass on OCRmyPDF output.** The post-OCR `pdfwrite` rebuild strips the `/Font` resources OCRmyPDF just wrote. Let OCRmyPDF own optimization via `--optimize 0/2/3` keyed off the requested preset. (Phase 2 fix; tracked under "Known issues".)
-4. **`smallest` is the default preset.** It's the only preset that consistently shrinks ScanSnap-family input across sizes and color depths (Sample A: -17%, Sample B: -95.9%). `archival` triples Sample A; `balanced` adds 34%.
+4. **`smallest` is the default preset.** It's the only preset that consistently shrinks already-OCR'd scanner output across sizes and color depths (Sample A: -17%, Sample B: -95.9% — see `BENCHMARKS.md`). `archival` and `balanced` both grow the file on Sample A.
 
 ## Stack
 
@@ -131,20 +131,9 @@ Top-level directories worth knowing:
 - **Cross-platform Ghostscript binary lookup.** `core/compress.py:_gs_exe()` tries `gswin64c` → `gswin32c` → `gs` and raises `SystemToolError("ghostscript", ...)` if none are found. Don't hard-code, and don't catch the precheck error to silently substitute a default.
 - **Markdown style** (for README, etc.): blank line after every heading and around list blocks; no emphasis inside headings; bare URLs wrapped in angle brackets; always specify a code-fence language.
 
-## My working style
-
-- I am not a software engineer; I read Python comfortably but don't write
-  it from scratch. Explain what you're doing, why, and how it fits the
-  larger goal.
-- Process matters as much as product — show your reasoning.
-- For style, formatting, and tooling preferences, defer to my global
-  Claude Code config at ~/.claude/CLAUDE.md and any skills installed at
-  ~/.claude/skills/. Do not assume preferences from outside this
-  environment apply here.
-
 ## Where I left off
 
-**Phase 1 complete (2026-04-29).** Foundation is in place:
+**Phase 1 complete.** Foundation is in place:
 
 - Settings rebuilt as a single flat `AppSettings` dataclass with
   `default_preset="smallest"`, `oversize_policy="fallback"`, and an
@@ -172,20 +161,21 @@ commit `1cc420e`); modernization Batches A–E (`fa81517`..`1428564`).
 
 All slated for Phase 2 (pipeline rethink) — see `ROADMAP.md`.
 
-- **`--force-ocr` produces unusable output.** Verified on Sample A: 11+
-  minutes of Tesseract work followed by the `balanced` Ghostscript pass
-  destroys the OCR text layer (no `/Font` resources on output pages).
-  Drop the post-OCR Ghostscript pass; let OCRmyPDF own optimization.
-  Codified as Design rule #3.
-- **`needs_ocr` false-positives on pdfminer-strict PDFs.** Verified on
-  Sample B: pdfminer raises `PDFSyntaxError` on a file pikepdf reads
-  fine; `detect.py` catches the exception and returns `True`,
-  triggering a useless multi-hour OCR pass. Switch the existence probe
-  to pikepdf. Codified as Design rule #2.
-- **Output can exceed input size.** Verified: `archival` triples Sample A
-  (3.07×), `balanced` adds 34%. The settings model now carries
-  `oversize_policy` but the pipeline does not yet honor it. Codified
-  as Design rule #1.
+- **`--force-ocr` produces unusable output.** Verified on Sample A
+  (B&W book scan): 11+ minutes of Tesseract work followed by the
+  `balanced` Ghostscript pass destroys the OCR text layer (no
+  `/Font` resources on output pages). Drop the post-OCR Ghostscript
+  pass; let OCRmyPDF own optimization. Codified as Design rule #3.
+- **`needs_ocr` false-positives on pdfminer-strict PDFs.** Verified
+  on Sample B (color textbook scan): pdfminer raises
+  `PDFSyntaxError` on a file pikepdf reads fine; `detect.py` catches
+  the exception and returns `True`, triggering a useless multi-hour
+  OCR pass. Switch the existence probe to pikepdf. Codified as
+  Design rule #2.
+- **Output can exceed input size.** Verified: `archival` triples
+  Sample A (3.07×), `balanced` adds 34%. The settings model now
+  carries `oversize_policy` but the pipeline does not yet honor it.
+  Codified as Design rule #1.
 - **Starlette 1.0 major bump unverified at runtime.** Imports cleanly
   but no `/api/process` request exercised. Phase 4 fix.
 - **GUI not click-through tested in a browser.** Phase 5.
