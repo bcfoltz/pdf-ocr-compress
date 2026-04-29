@@ -26,6 +26,7 @@ from .errors import (
     APIException,
     install_exception_handlers,
 )
+from .storage import Storage, default_storage
 
 app = FastAPI(
     title="PDF OCR + Compression API",
@@ -39,15 +40,32 @@ install_exception_handlers(app)
 TEMP_DIR = Path(tempfile.gettempdir()) / "pdf_ocr_api"
 TEMP_DIR.mkdir(exist_ok=True)
 
-# File storage with cleanup (keep files for 1 hour)
-file_storage = {}
+# Phase 4 item 1 — SQLite-backed persistence. The module-level reference
+# is a Storage instance (rebindable for tests via `set_storage`); routes
+# read it through `_storage()` so monkeypatching is transparent.
+STORAGE: Storage = default_storage()
 
-# Phase 3 — in-memory batch job state. Phase 4 swaps for SQLite.
+
+def _storage() -> Storage:
+    return STORAGE
+
+
+def set_storage(storage: Storage) -> None:
+    """Test hook — swap the module-level Storage for an isolated one.
+
+    Production code never calls this; tests use it to point the app at a
+    `tmp_path` SQLite DB so they don't touch the user's TEMP_DIR.
+    """
+    global STORAGE
+    STORAGE = storage
+
+
+# Phase 3 — in-memory batch job state. Phase 4 task 3 swaps for SQLite.
 batch_jobs: dict = {}
 
 
 def cleanup_old_jobs():
-    """Remove batch jobs older than 1 hour. Mirrors cleanup_old_files()."""
+    """Remove batch jobs older than 1 hour. Mirrors the SQLite TTL on files."""
     now = datetime.now()
     expired = []
     for job_id, state in batch_jobs.items():
@@ -117,23 +135,12 @@ class BatchAcceptedResponse(BaseModel):
 
 
 def cleanup_old_files():
-    """Remove files older than 1 hour from storage."""
-    now = datetime.now()
-    expired = []
+    """Remove rows past expires_at and their on-disk artifacts.
 
-    for file_id, info in file_storage.items():
-        if now - info["timestamp"] > timedelta(hours=1):
-            expired.append(file_id)
-            try:
-                if info["path"].exists():
-                    info["path"].unlink()
-                if info.get("workdir") and info["workdir"].exists():
-                    shutil.rmtree(info["workdir"], ignore_errors=True)
-            except Exception:
-                pass
-
-    for file_id in expired:
-        del file_storage[file_id]
+    Phase 4 — backed by SQLite. The 1-hour TTL is enforced via the
+    `expires_at` column written by `Storage.insert_file`.
+    """
+    _storage().cleanup_expired_files()
 
 
 @app.get("/")
@@ -212,15 +219,15 @@ async def process_pdf(
             force_ocr=force_ocr,
         )
 
-        # Store file info
-        file_storage[file_id] = {
-            "path": result.output_path,
-            "workdir": workdir,
-            "timestamp": datetime.now(),
-            "original_name": file.filename,
-            "mode": mode,
-            "preset": preset,
-        }
+        # Persist to SQLite (Phase 4 — survives uvicorn restart).
+        _storage().insert_file(
+            file_id=file_id,
+            original_name=file.filename,
+            output_path=result.output_path,
+            workdir=workdir,
+            mode=mode,
+            preset=preset,
+        )
 
         # reduction_percent uses the inverse-sign convention of pct_change
         # (positive when output shrank); kept for API backward compat.
@@ -276,19 +283,18 @@ async def download_file(file_id: str):
     """
     cleanup_old_files()
 
-    if file_id not in file_storage:
+    row = _storage().get_file(file_id)
+    if row is None:
         raise APIException(404, FILE_NOT_FOUND, "File not found or expired")
 
-    file_info = file_storage[file_id]
-
-    if not file_info["path"].exists():
+    output_path = Path(row["output_path"])
+    if not output_path.exists():
         raise APIException(404, FILE_NOT_FOUND, "File has been deleted")
 
-    # Return original filename as-is
-    download_name = file_info["original_name"]
-
     return FileResponse(
-        path=file_info["path"], media_type="application/pdf", filename=download_name
+        path=output_path,
+        media_type="application/pdf",
+        filename=row["original_name"],
     )
 
 

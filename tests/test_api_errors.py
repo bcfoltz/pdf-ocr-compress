@@ -20,7 +20,8 @@ from pdf_ocr_compress.utils.errors import PDFFormatError, SystemToolError
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(isolated_api_storage) -> TestClient:
+    """TestClient with an isolated SQLite DB (no shared TEMP_DIR pollution)."""
     return TestClient(app)
 
 

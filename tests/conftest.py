@@ -5,6 +5,26 @@ import os
 import pikepdf
 import pytest
 
+
+@pytest.fixture
+def isolated_api_storage(tmp_path, monkeypatch):
+    """Point the FastAPI server at a fresh SQLite DB under tmp_path.
+
+    Without this, API tests would touch the user's real TEMP_DIR DB at
+    <gettempdir>/pdf_ocr_api/pdf_ocr_api.db. The fixture builds an
+    isolated `Storage` and rebinds `server.STORAGE` for the duration of
+    the test. Yields the `Storage` instance for direct assertions.
+    """
+    from pdf_ocr_compress.api import server as server_module
+    from pdf_ocr_compress.api.storage import Storage
+
+    db_path = tmp_path / "api.db"
+    test_storage = Storage(db_path)
+    monkeypatch.setattr(server_module, "STORAGE", test_storage)
+    yield test_storage
+    test_storage.close()
+
+
 # Source-of-truth text rendered into image_paragraph_pdf. The fixture and
 # the round-trip OCR fidelity test both reference this so we compare
 # OCR output token count against what was actually rendered, not against
