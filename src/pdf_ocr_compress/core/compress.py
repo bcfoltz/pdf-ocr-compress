@@ -105,6 +105,7 @@ def compress(
     preset: str = "balanced",
     *,
     _enforce_oversize: bool = True,
+    _result: dict | None = None,
 ) -> Path:
     """
     Full compress pipeline that ALWAYS produces a fresh file and returns its path.
@@ -115,6 +116,12 @@ def compress(
     oversize_policy is applied at the end (Design rule #1, output ≤ input).
     The policy's "fallback retry" recurses with _enforce_oversize=False to
     avoid an infinite loop.
+
+    `_result` is an optional OUT-parameter dict; when supplied the function
+    populates _result["preset_used"] with the preset whose output we
+    actually shipped — "passthrough" if the input was copied verbatim,
+    "smallest" if the fallback retry succeeded, otherwise the requested
+    preset.
     """
     # Resolve the final output path up front so the user's chosen name is honored.
     if output_pdf.resolve() == input_pdf.resolve() or output_pdf.exists():
@@ -138,6 +145,8 @@ def compress(
             pass
 
     if not _enforce_oversize:
+        if _result is not None:
+            _result["preset_used"] = preset
         return output_pdf
 
     # 4) Oversize-policy guard: per Design rule #1, output ≤ input. If the
@@ -150,10 +159,30 @@ def compress(
             input_pdf, output_pdf, preset="smallest", _enforce_oversize=False
         )
 
-    return enforce_oversize_policy(
+    outcome: dict[str, str] = {}
+    final_path = enforce_oversize_policy(
         input_pdf,
         output_pdf,
         policy,
         can_retry=(preset != "smallest"),
         retry_with_smallest=_retry_smallest,
+        outcome=outcome,
     )
+
+    if _result is not None:
+        _result["preset_used"] = _resolve_preset_used(preset, outcome.get("status"))
+    return final_path
+
+
+def _resolve_preset_used(requested: str, status: str | None) -> str:
+    """Map enforce_oversize_policy outcome to a preset_used label.
+
+    - "no_violation"/"warned" -> the requested preset shipped as-is
+    - "retry_succeeded"       -> the smallest fallback shipped
+    - "passthrough"           -> input was copied verbatim
+    """
+    if status == "passthrough":
+        return "passthrough"
+    if status == "retry_succeeded":
+        return "smallest"
+    return requested

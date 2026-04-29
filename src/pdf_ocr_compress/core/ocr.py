@@ -31,6 +31,7 @@ def run_ocr(
     force_ocr: bool = None,
     *,
     _enforce_oversize: bool = True,
+    _result: dict | None = None,
 ) -> Path:
     """
     Runs OCRmyPDF and returns the NEW output path created.
@@ -40,6 +41,12 @@ def run_ocr(
     oversize_policy is applied at the end (Design rule #1, output ≤ input).
     The policy's "fallback retry" recurses with _enforce_oversize=False to
     avoid an infinite loop.
+
+    `_result` is an optional OUT-parameter dict; when supplied the function
+    populates _result["preset_used"] with the preset whose output we
+    actually shipped — "passthrough" if the input was copied verbatim,
+    "smallest" if the fallback retry succeeded, otherwise the requested
+    preset.
     """
     # Get configuration defaults
     settings = get_config().settings
@@ -168,6 +175,8 @@ def run_ocr(
         logger.info(f"OCR processing completed in {duration:.1f}s: {output_pdf.name}")
 
         if not _enforce_oversize:
+            if _result is not None:
+                _result["preset_used"] = preset
             return output_pdf
 
         # Oversize-policy guard: per Design rule #1, output ≤ input. On
@@ -188,13 +197,24 @@ def run_ocr(
                 _enforce_oversize=False,
             )
 
-        return enforce_oversize_policy(
+        outcome: dict[str, str] = {}
+        final_path = enforce_oversize_policy(
             input_pdf,
             output_pdf,
             settings.oversize_policy,
             can_retry=(preset != "smallest"),
             retry_with_smallest=_retry_smallest,
+            outcome=outcome,
         )
+        if _result is not None:
+            status = outcome.get("status")
+            if status == "passthrough":
+                _result["preset_used"] = "passthrough"
+            elif status == "retry_succeeded":
+                _result["preset_used"] = "smallest"
+            else:
+                _result["preset_used"] = preset
+        return final_path
 
     except CalledProcessError as e:
         duration = time.time() - start_time

@@ -111,6 +111,52 @@ def test_fallback_no_retry_passes_through_directly(tmp_path):
     assert out.read_bytes() == inp.read_bytes()
 
 
+# --- outcome OUT-parameter records what actually happened --------------------
+
+
+def test_outcome_no_violation(tmp_path):
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 800)
+    outcome: dict = {}
+    enforce_oversize_policy(inp, out, "fallback", outcome=outcome)
+    assert outcome["status"] == "no_violation"
+
+
+def test_outcome_warned(tmp_path):
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 1500)
+    outcome: dict = {}
+    enforce_oversize_policy(inp, out, "warn", outcome=outcome)
+    assert outcome["status"] == "warned"
+
+
+def test_outcome_retry_succeeded(tmp_path):
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 1500)
+
+    def retry_smallest():
+        return _write(tmp_path / "out.pdf", 600)
+
+    outcome: dict = {}
+    enforce_oversize_policy(
+        inp,
+        out,
+        "fallback",
+        can_retry=True,
+        retry_with_smallest=retry_smallest,
+        outcome=outcome,
+    )
+    assert outcome["status"] == "retry_succeeded"
+
+
+def test_outcome_passthrough(tmp_path):
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 1500)
+    outcome: dict = {}
+    enforce_oversize_policy(inp, out, "fallback", can_retry=False, outcome=outcome)
+    assert outcome["status"] == "passthrough"
+
+
 # --- Wiring tests: compress() actually plumbs the guard through ----------------
 
 

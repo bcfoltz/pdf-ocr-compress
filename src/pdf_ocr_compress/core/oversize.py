@@ -22,6 +22,7 @@ def enforce_oversize_policy(
     *,
     can_retry: bool = False,
     retry_with_smallest: Callable[[], Path] | None = None,
+    outcome: dict | None = None,
 ) -> Path:
     """Apply oversize_policy to a pipeline output. Returns the final path.
 
@@ -39,11 +40,18 @@ def enforce_oversize_policy(
     can_retry should be False when the original call was already
     preset="smallest" (no smaller preset to fall back to). In that case
     fallback skips the retry and goes straight to the passthrough copy.
+
+    `outcome` is an optional OUT-parameter dict; when supplied the helper
+    populates outcome["status"] with one of: "no_violation", "warned",
+    "retry_succeeded", "passthrough". On policy="fail" the function
+    raises before populating outcome.
     """
     in_size = input_path.stat().st_size
     out_size = output_path.stat().st_size
 
     if out_size <= in_size:
+        if outcome is not None:
+            outcome["status"] = "no_violation"
         return output_path
 
     pct = 100.0 * (out_size - in_size) / max(in_size, 1)
@@ -54,6 +62,8 @@ def enforce_oversize_policy(
 
     if policy == "warn":
         logger.warning(f"{msg}; keeping output (oversize_policy=warn)")
+        if outcome is not None:
+            outcome["status"] = "warned"
         return output_path
 
     if policy == "fail":
@@ -74,6 +84,8 @@ def enforce_oversize_policy(
     if policy != "fallback":
         # Unknown policy — keep output rather than lose user data.
         logger.error(f"Unknown oversize_policy={policy!r}; keeping output")
+        if outcome is not None:
+            outcome["status"] = "warned"
         return output_path
 
     logger.info(f"{msg}; retrying with smallest preset (oversize_policy=fallback)")
@@ -86,6 +98,8 @@ def enforce_oversize_policy(
         retry_path = retry_with_smallest()
         if retry_path.stat().st_size <= in_size:
             logger.info(f"smallest preset succeeded ({retry_path.stat().st_size} B)")
+            if outcome is not None:
+                outcome["status"] = "retry_succeeded"
             return retry_path
         logger.info("smallest also exceeded input; passing through input unchanged")
         try:
@@ -95,4 +109,6 @@ def enforce_oversize_policy(
 
     shutil.copy2(input_path, output_path)
     logger.info(f"Wrote passthrough copy ({in_size} B) to {output_path.name}")
+    if outcome is not None:
+        outcome["status"] = "passthrough"
     return output_path
