@@ -185,3 +185,6 @@ Thumbs.db
 *.tmp
 *.temp
 *~
+
+# Personal / draft content not for the repo
+LINKEDIN.md

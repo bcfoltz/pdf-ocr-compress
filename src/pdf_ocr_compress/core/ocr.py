@@ -7,7 +7,6 @@ import shutil
 from ..config import get_config
 from ..utils.logging_config import get_performance_logger, get_logger
 from ..utils.errors import SystemToolError, PDFProcessingError
-from ..utils.temp_manager import get_temp_manager
 
 logger = get_logger("ocr")
 perf_logger = get_performance_logger("ocr")

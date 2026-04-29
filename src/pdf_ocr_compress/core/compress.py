@@ -86,20 +86,28 @@ def linearize(src: Path, dst: Path) -> Path:
 def compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Path:
     """
     Full compress pipeline that ALWAYS produces a fresh file and returns its path.
-    No in-place writes; no overwrites.
+    No in-place writes; no overwrites. The user's requested output filename is
+    honored (only altered if it collides with the input or an existing file).
     """
-    # 1) Ghostscript to a fresh path (not the input)
-    gs_out = ghostscript_compress(input_pdf, output_pdf, preset=preset)
+    # Resolve the final output path up front so the user's chosen name is honored.
+    if output_pdf.resolve() == input_pdf.resolve() or output_pdf.exists():
+        output_pdf = _unique_name(output_pdf)
 
-    # 2) Linearize into a fresh final file
-    final_out = output_pdf.with_name(output_pdf.stem + "_processed.pdf")
-    final_out = linearize(gs_out, final_out)
+    # 1) Ghostscript writes to a private intermediate so we can linearize into the final path.
+    gs_tmp = output_pdf.with_name(output_pdf.stem + "__gs_tmp" + output_pdf.suffix)
+    if gs_tmp.exists():
+        gs_tmp = _unique_name(gs_tmp, suffix="__gs_tmp")
+    gs_out = ghostscript_compress(input_pdf, gs_tmp, preset=preset)
 
-    # 3) Cleanup the GS intermediate
+    # 2) Linearize into the user's chosen final path.
     try:
-        if gs_out.exists() and gs_out != final_out:
-            gs_out.unlink()
-    except Exception:
-        pass
+        linearize(gs_out, output_pdf)
+    finally:
+        # 3) Cleanup the GS intermediate.
+        try:
+            if gs_out.exists():
+                gs_out.unlink()
+        except Exception:
+            pass
 
-    return final_out
+    return output_pdf
