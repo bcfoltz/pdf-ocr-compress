@@ -135,66 +135,83 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-**Phase 3 closed (2026-04-29).** Folder-batch mode lands in
-`core/batch.py` and is wired through CLI, GUI, and API. The pipeline
-itself is unchanged: `run_batch` is a sequential `for` loop calling
-`run_pipeline()` per file with a retry-once + end-of-batch second-pass
-ladder. One bad PDF in the middle of a batch no longer kills the rest.
-Pick up at **Phase 4 (API hardening)** — see `ROADMAP.md`.
+**Phase 4 closed (2026-04-29).** API is now real backend service
+material: SQLite persistence (file IDs and batch jobs survive a
+uvicorn restart), stable `APIError` wire shape on every 4xx/5xx,
+environment-aware `/health`, accurate OpenAPI docs at `/docs`, and a
+curl + jq smoke test that exercises everything end-to-end. Pick up at
+**Phase 5 (GUI catchup)** — see `ROADMAP.md`.
 
-**Phase 3 deliverables:**
+**Phase 4 deliverables:**
 
-- `core/batch.py` — `BatchResult`, `BatchReport`, `BatchJobState`
-  dataclasses; `run_batch(input_dir, output_dir, *, mode, preset,
-  lang, jobs, pdfa, force_ocr, progress_callback) -> BatchReport`.
-- Failure ladder per file: initial → immediate retry → end-of-batch
-  retry. Worst-case `attempts=3`. No backoff, no error classification
-  (deterministic policy per CLAUDE.md "small focused modules" rule).
-- `<output_dir>/batch_report.json` written every run, including
-  zero-file folders. Schema = `BatchReport.to_dict()`; per-file
-  results carry the full nested `ProcessResult.to_dict()`.
-- CLI: `pdf-ocr batch <input_dir> [--output-dir Y] [--mode auto|ocr|
-  compress] [--preset X] [--lang L] [--jobs N] [--pdfa] [--force-ocr]`.
-  Defaults from `get_config().settings`. Per-file lines + summary +
-  report path printed at end.
-- GUI: new "Batch" section on `gui/basic.py` (still single page) —
-  multi-file uploader, live progress bar + dataframe, per-file
-  download buttons, `batch_report.json` download.
-- API: `POST /api/batch` (server-side folder path JSON body, no
-  upload) returns 202 + `{job_id, total_files}`. Processing runs in
-  `BackgroundTasks` against the in-memory `batch_jobs` dict.
-  `GET /api/batch/{job_id}/status` polls `BatchJobState`. Phase 4
-  swaps the dict for SQLite without changing the wire shape.
+- `api/errors.py` — `APIError` Pydantic model + `APIException` carrier
+  + `install_exception_handlers(app)`. Three handlers wire into the
+  FastAPI app: `APIException` (server-raised), `PDFProcessingError`
+  (domain leak from `run_pipeline`), `RequestValidationError`
+  (FastAPI's automatic 422 wrapped to the same shape). Stable code
+  constants: `INPUT_NOT_PDF`, `INVALID_MODE`, `INVALID_PRESET`,
+  `INVALID_FOLDER`, `INVALID_OUTPUT_DIR`, `FILE_NOT_FOUND`,
+  `BATCH_JOB_NOT_FOUND`, `OCR_TOOL_MISSING`,
+  `GHOSTSCRIPT_TOOL_MISSING`, `PROCESSING_FAILED`,
+  `OUTPUT_GREW_NO_FALLBACK`, `VALIDATION_ERROR`, plus reserved
+  `FILE_TOO_LARGE` (no enforcement path yet).
+- `api/storage.py` — single SQLite owner. Tables: `files (file_id PK,
+  original_name, output_path, workdir, mode, preset, created_at,
+  expires_at)` and `batch_jobs (job_id PK, status, started_at,
+  finished_at, progress_current, progress_total, error_msg,
+  report_json)`. `Storage.__init__` runs `_mark_stale_running_jobs()`
+  once at boot, so any queued/running rows from a dead previous
+  process come back as `status='error'` with
+  `error_msg='server restarted mid-job'`. WAL journaling +
+  `check_same_thread=False` so BackgroundTasks workers can write
+  per-file progress while polls read.
+- `/health` reports: `version` (importlib.metadata),
+  `ghostscript_binary`, `tesseract_binary`, `tesseract_languages`
+  (parsed from `tesseract --list-langs`, handles stdout-or-stderr
+  builds), `queue_depth` (queued+running batch jobs). Binary detection
+  never raises — missing tools surface as null paths and an empty
+  language list, so monitoring can distinguish "API up" from "API up
+  but Tesseract missing".
+- OpenAPI: `responses=` declarations on every error path point at
+  `APIError`; `ProcessResponse` / `BatchRequest` /
+  `BatchAcceptedResponse` carry `json_schema_extra` examples so /docs
+  Try-it forms pre-fill with realistic values. Endpoint summaries +
+  tightened descriptions explain mode/preset semantics and the batch
+  failure ladder.
+- `tests/api_smoke.sh` — bash + curl + jq. Drives /health, /process
+  happy path + 400 INVALID_MODE error path, /download, /batch with a
+  2-file folder, polls /status until done, hits an unknown job_id for
+  404. Cross-platform path handling via `cygpath -w` on git-bash
+  (no-op on Linux/macOS). Exits 0 (PARTIAL PASS) when Ghostscript is
+  missing.
 
-**Tests:** test_batch.py covers dataclass serialization, happy path,
-progress callback, ordering, retry-once / end-of-batch / final
-failure, and real-binary integration (gated on Ghostscript /
-Tesseract). test_cli_batch.py smoke-tests the CLI command via
-`typer.testing.CliRunner`. No httpx-based API test in Phase 3 (Phase
-4 covers via curl smoke). No automated GUI test in Phase 3 (Phase 5
-covers browser click-through).
+**Tests added:** `test_api_errors.py` (15), `test_api_storage.py`
+(11), `test_api_health.py` (5), `test_api_openapi.py` (11). 118/118
+total tests pass; ruff + black green; smoke script passes against a
+live uvicorn in ~3s on Windows git-bash.
 
-**Honest gaps still open after Phase 3 (deferred to later phases):**
+**Honest gaps still open after Phase 4 (deferred to later phases):**
 
-- API endpoint integration (httpx / curl) — Phase 4 deliverable.
 - GUI browser click-through — Phase 5 deliverable.
-- `POST /api/batch/{job_id}/cancel` — explicitly deferred. Adding it
-  later means polling a `should_cancel` flag inside `run_batch`; not
-  hard, just not done.
-- SQLite persistence for `batch_jobs` — Phase 4 deliverable.
-- Existing single-file CLI/GUI/API surface defaults still hardcoded
-  (Phase 5). The new `batch` surfaces already read from
+- `POST /api/batch/{job_id}/cancel` — still deferred. Adding it later
+  means polling a `should_cancel` flag inside `run_batch`; not hard,
+  just not done.
+- Existing single-file CLI/GUI/API surface defaults still hardcoded.
+  The `batch` surfaces and `run_pipeline` already read from
   `get_config().settings`; the older `ocr` / `compress` / `process`
-  commands and the single-file upload form do not.
+  commands and the single-file upload form do not (Phase 5).
+- `FILE_TOO_LARGE` is reserved as a stable error code but has no
+  enforcement (no `max_upload_bytes` setting yet). Adding it means a
+  config setting + chunked upload handling.
 
 ## Known issues / tech debt
 
 The three Phase 0 pipeline bugs are FIXED in Phase 2 items 1–3 (see
 "Where I left off"). Remaining items below.
 
-- **Starlette 1.0 major bump unverified at runtime.** Imports cleanly
-  but no `/api/process` request exercised in a test. Phase 4 fix
-  (`tests/api_smoke.sh`).
+- **~~Starlette 1.0 major bump unverified at runtime.~~** Fixed in
+  Phase 4: `tests/api_smoke.sh` posts a real PDF through `/api/process`
+  end-to-end against a live uvicorn process.
 - **GUI not click-through tested in a browser.** Phase 5. The 4d
   refactor swapped the routing block but no manual smoke test was
   performed.
