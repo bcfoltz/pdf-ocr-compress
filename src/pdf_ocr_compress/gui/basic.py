@@ -175,7 +175,7 @@ def _render_defaults_panel(cfg) -> None:
             )
         new_output_dir_str = st.text_input(
             "Default output directory (blank = unset)",
-            placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
+            placeholder="e.g. ~/Documents/scans/processed",
             key="def_output_dir",
         )
         st.button(
@@ -644,7 +644,7 @@ def main():
     else:
         batch_input_folder_str = st.text_input(
             "Input folder (contains PDFs to process)",
-            placeholder=r"e.g. G:\My Drive\Book Scans\Inbox",
+            placeholder="e.g. ~/Documents/scans/inbox",
             key="batch_in_folder",
         )
         st.button(
@@ -657,7 +657,7 @@ def main():
             st.warning(browse_err)
         batch_output_folder_str = st.text_input(
             "Output folder (optional)",
-            placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
+            placeholder="e.g. ~/Documents/scans/processed",
             help=(
                 "Where processed PDFs go. Leave blank to use your saved "
                 "default output directory (set in the sidebar Defaults "
