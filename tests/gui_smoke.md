@@ -9,8 +9,8 @@ Ghostscript must be on PATH for the OCR steps. Record results inline
 
 ## Setup
 
-- [ ] `uv run pdf-ocr-gui` boots without traceback.
-- [ ] Streamlit lands at `http://localhost:8501` in the default browser.
+- [X] `uv run pdf-ocr-gui` boots without traceback.
+- [X] Streamlit lands at `http://localhost:8501` in the default browser.
 
 ## Defaults expander
 

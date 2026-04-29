@@ -597,6 +597,10 @@ def main():
     )
 
     if batch_btn:
+        # Starting a fresh batch — drop any prior run's persisted results
+        # so they don't show during the new run.
+        st.session_state.pop("batch_results", None)
+
         pipeline_mode = {
             "OCR only": "ocr",
             "Compress only": "compress",
@@ -680,7 +684,8 @@ def main():
             _render_error(e)
             st.stop()
 
-        # Final results table
+        # Build the final results table (in-flight `live_table` gets
+        # the rich version below).
         final_rows = []
         for r in report.results:
             if r.status == "ok" and r.process_result is not None:
@@ -705,36 +710,66 @@ def main():
                         "error": r.error_msg or "",
                     }
                 )
-        live_table.dataframe(final_rows, hide_index=True)
 
-        st.success(report.one_line_summary())
-        if out_source in (
+        # Persist everything the results section needs so it survives
+        # reruns triggered by the per-file download buttons. Streamlit
+        # reruns the whole script on every widget interaction; without
+        # this stash, clicking one download button would unmount the
+        # rest of the result UI because `batch_btn` is False on rerun.
+        st.session_state["batch_results"] = {
+            "report_summary": report.one_line_summary(),
+            "final_rows": final_rows,
+            "batch_out": batch_out,
+            "out_source": out_source,
+            "batch_source": batch_source,
+            "ok_outputs": [
+                {
+                    "input_name": r.input_path.name,
+                    "output_path": r.output_path,
+                    "output_name": r.output_path.name,
+                }
+                for r in report.results
+                if r.status == "ok"
+                and r.output_path is not None
+                and r.output_path.exists()
+            ],
+            "report_json_path": batch_out / "batch_report.json",
+        }
+
+    # --- Persisted batch results section ---
+    # Renders any time `st.session_state["batch_results"]` is populated.
+    # Lives outside `if batch_btn:` so download-button reruns don't
+    # tear it down.
+    persisted = st.session_state.get("batch_results")
+    if persisted:
+        live_table = st.empty()
+        live_table.dataframe(persisted["final_rows"], hide_index=True)
+
+        st.success(persisted["report_summary"])
+        if persisted["out_source"] in (
             "override",
             "setting",
             "fallback",
-        ) and batch_source.startswith("Use local"):
-            st.caption(f"📂 Outputs in: `{batch_out}`")
+        ) and persisted["batch_source"].startswith("Use local"):
+            st.caption(f"📂 Outputs in: `{persisted['batch_out']}`")
 
         # Per-file download buttons (upload mode only — outputs already on
         # disk where the user pointed in folder mode).
-        if batch_source == "Upload multiple PDFs in browser":
-            for i, r in enumerate(report.results):
-                if (
-                    r.status == "ok"
-                    and r.output_path is not None
-                    and r.output_path.exists()
-                ):
-                    with open(r.output_path, "rb") as f:
+        if persisted["batch_source"] == "Upload multiple PDFs in browser":
+            for i, item in enumerate(persisted["ok_outputs"]):
+                output_path = item["output_path"]
+                if output_path.exists():
+                    with open(output_path, "rb") as f:
                         st.download_button(
-                            f"⬇️ Download {r.input_path.name}",
+                            f"⬇️ Download {item['input_name']}",
                             data=f.read(),
-                            file_name=r.output_path.name,
+                            file_name=item["output_name"],
                             mime="application/pdf",
-                            key=f"dl_{i}_{r.input_path.name}",
+                            key=f"dl_{i}_{item['input_name']}",
                         )
 
         # Batch report download (every mode)
-        report_path = batch_out / "batch_report.json"
+        report_path = persisted["report_json_path"]
         if report_path.exists():
             with open(report_path, "rb") as f:
                 st.download_button(
