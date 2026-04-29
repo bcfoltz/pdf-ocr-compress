@@ -9,7 +9,7 @@ work, gated on the prior one. Pick up at the next non-completed phase.
 - [x] **Phase 0 — Investigate** (2026-04-28/29) — see `BENCHMARKS.md`
 - [x] **Phase 1 — Foundation** (2026-04-29) — commit `80ea6ae`
 - [x] **Phase 2 — Pipeline rethink** (2026-04-29)
-- [ ] **Phase 3 — Batch**
+- [x] **Phase 3 — Batch** (2026-04-29)
 - [ ] **Phase 4 — API hardening**
 - [ ] **Phase 5 — GUI catchup**
 - [ ] **Phase 6 — Documentation polish**

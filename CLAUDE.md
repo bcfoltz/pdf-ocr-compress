@@ -135,98 +135,57 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-**Phase 2 closed (2026-04-29).** All six items shipped; all three
-Phase 0 bugs are fixed; the structured output report flows through
-every surface; the OCR pipeline actually produces extractable text.
-Pick up at **Phase 3 (folder batch mode)** — see `ROADMAP.md`.
+**Phase 3 closed (2026-04-29).** Folder-batch mode lands in
+`core/batch.py` and is wired through CLI, GUI, and API. The pipeline
+itself is unchanged: `run_batch` is a sequential `for` loop calling
+`run_pipeline()` per file with a retry-once + end-of-batch second-pass
+ladder. One bad PDF in the middle of a batch no longer kills the rest.
+Pick up at **Phase 4 (API hardening)** — see `ROADMAP.md`.
 
-**Phase 2 deliverables (in order):**
+**Phase 3 deliverables:**
 
-- **Item 1 (`be2cc72`)** — `core/detect.needs_ocr` rewritten on
-  pikepdf. Opens with the tolerant parser; checks first 5 pages for
-  any `/Font` resource. Fixes Sample B's pdfminer-strict false-
-  positive.
-- **Item 2 (`d0793ea`)** — post-OCR Ghostscript pass dropped from CLI,
-  GUI, and API. OCRmyPDF now owns optimization via `--optimize N`
-  matching preset (archival=0, balanced=2, smallest=3, plus
-  `--jbig2-lossy` on smallest).
-- **Item 3 (`fcfdc8f`)** — `oversize_policy` enforced via new
-  `core/oversize.py:enforce_oversize_policy`. `compress()` and
-  `run_ocr()` both call it; the fallback retry recurses with
-  `_enforce_oversize=False` to break the loop.
-- **Item 4 (`5822209`/`afc062c`/`ce28a5f`/`9a12709`)** — structured
-  output report. `ProcessResult` dataclass + `run_pipeline` in
-  `core/pipeline.py`. CLI/GUI/API all call `run_pipeline` exclusively
-  and surface the same report. API `ProcessResponse` gained 5 fields
-  (`ocr_ran`, `ocr_skipped_reason`, `preset_actually_used`,
-  `pdfminer_text_extractable`, `pct_change`); GUI shows them in a
-  success banner with a JSON expander.
-- **Item 5 (`a735361`)** — end-to-end pipeline-branch tests in
-  `tests/test_pipeline_branches.py`. Three branches × three fixtures
-  (`text_pdf` reused; new `image_only_pdf` from PIL; new
-  `incompressible_pdf` with a random-bytes image so Ghostscript
-  inflates under every preset). Gated on real Ghostscript/Tesseract
-  via `requires_*` skipifs. **Caught and fixed a real runtime bug:**
-  `core/ocr.py` was passing `--tesseract-timeout 0`, which in
-  OCRmyPDF ≥13 means "0-second budget" not "unlimited"; Tesseract
-  gave up immediately and emitted empty OCR layers on every real run.
-  The unit tests in `test_pipeline.py` couldn't see it because they
-  mock `_run_ocr`. Fix: omit the flag when
-  `settings.tesseract_timeout <= 0`, letting OCRmyPDF's own default
-  apply. Setting field semantics preserved (env-var override still
-  works for non-zero values).
-- **Item 6 (`65badf0`)** — text-fidelity round-trip in
-  `tests/test_text_fidelity.py`. `text_paragraph_pdf` and
-  `image_paragraph_pdf` fixtures (~45 tokens each, sharing a
-  `PARAGRAPH_TEXT` constant in `conftest.py`). Both branches assert
-  pdfminer extracts the same approximate token count ±10%, non-empty,
-  not all `\f`. Test-local tokenizer splits on whitespace AND
-  lowercase→uppercase transitions to handle pdfminer's habit of
-  concatenating last-of-line + first-of-next-line at OCR Form-XObject
-  boundaries (`dog` + `Pack` → `dogPack`); content is preserved, just
-  whitespace-stripped.
+- `core/batch.py` — `BatchResult`, `BatchReport`, `BatchJobState`
+  dataclasses; `run_batch(input_dir, output_dir, *, mode, preset,
+  lang, jobs, pdfa, force_ocr, progress_callback) -> BatchReport`.
+- Failure ladder per file: initial → immediate retry → end-of-batch
+  retry. Worst-case `attempts=3`. No backoff, no error classification
+  (deterministic policy per CLAUDE.md "small focused modules" rule).
+- `<output_dir>/batch_report.json` written every run, including
+  zero-file folders. Schema = `BatchReport.to_dict()`; per-file
+  results carry the full nested `ProcessResult.to_dict()`.
+- CLI: `pdf-ocr batch <input_dir> [--output-dir Y] [--mode auto|ocr|
+  compress] [--preset X] [--lang L] [--jobs N] [--pdfa] [--force-ocr]`.
+  Defaults from `get_config().settings`. Per-file lines + summary +
+  report path printed at end.
+- GUI: new "Batch" section on `gui/basic.py` (still single page) —
+  multi-file uploader, live progress bar + dataframe, per-file
+  download buttons, `batch_report.json` download.
+- API: `POST /api/batch` (server-side folder path JSON body, no
+  upload) returns 202 + `{job_id, total_files}`. Processing runs in
+  `BackgroundTasks` against the in-memory `batch_jobs` dict.
+  `GET /api/batch/{job_id}/status` polls `BatchJobState`. Phase 4
+  swaps the dict for SQLite without changing the wire shape.
 
-**Tests:** 56 passing (was 21 at end of Phase 1). Black + ruff clean.
+**Tests:** test_batch.py covers dataclass serialization, happy path,
+progress callback, ordering, retry-once / end-of-batch / final
+failure, and real-binary integration (gated on Ghostscript /
+Tesseract). test_cli_batch.py smoke-tests the CLI command via
+`typer.testing.CliRunner`. No httpx-based API test in Phase 3 (Phase
+4 covers via curl smoke). No automated GUI test in Phase 3 (Phase 5
+covers browser click-through).
 
-**"Three surfaces, one pipeline" is now load-bearing** — CLI, GUI,
-and API all call exactly `core.pipeline.run_pipeline()` and surface
-the same `ProcessResult`. Routing logic lives in one place.
+**Honest gaps still open after Phase 3 (deferred to later phases):**
 
-**Phase 0 success criteria are now provable end-to-end:**
-
-- OCR branch produces pdfminer-extractable text (item 6's OCR round-
-  trip passes — proves Phase 0 bug #3 is fixed in practice, not just
-  in the args list).
-- Compress branch round-trips text 1:1 (item 6 compress test).
-- Oversize-fallback chain terminates at passthrough when every preset
-  inflates (item 5's passthrough test — enforces invariant #1).
-
-**Pick up at Phase 3 — Batch.** Per ROADMAP.md Phase 3, the work is
-folder-input mode across CLI/GUI/API:
-
-- CLI: `pdf-ocr batch <folder> [--preset X] [--output-dir Y] [--mode
-  auto|ocr|compress]`. Glob `*.pdf` in folder, sequential by default,
-  per-file `ProcessResult`, summary at the end.
-- GUI: multi-file uploader on `gui/basic.py` (still single page).
-- API: `/api/batch` endpoint.
-- **Out of scope reminder** (see "Out of scope" below): synchronous,
-  sequential, no async/threadpool. Single-counter retry ladder, not a
-  state machine. Don't reintroduce the deleted
-  `core/batch_processor.py` shape.
-
-**Honest gaps still open from Phase 2 (deferred to later phases):**
-
-- Streamlit GUI not click-through tested in a browser after item 4d.
-  Phase 5 covers it.
-- API endpoint has no `httpx`-based test. Phase 4 slates
-  `tests/api_smoke.sh`.
-- CLI/GUI/API surface defaults still hardcoded (preset, jobs, lang).
-  `run_pipeline` reads from `config.get_config()`; surface defaults
-  don't yet. Phase 5.
-
-**Earlier on this branch:** Phase 1 (`80ea6ae`); Phase 0 benchmarks
-(`BENCHMARKS.md`, commit `1cc420e`); modernization Batches A–E
-(`fa81517`..`1428564`).
+- API endpoint integration (httpx / curl) — Phase 4 deliverable.
+- GUI browser click-through — Phase 5 deliverable.
+- `POST /api/batch/{job_id}/cancel` — explicitly deferred. Adding it
+  later means polling a `should_cancel` flag inside `run_batch`; not
+  hard, just not done.
+- SQLite persistence for `batch_jobs` — Phase 4 deliverable.
+- Existing single-file CLI/GUI/API surface defaults still hardcoded
+  (Phase 5). The new `batch` surfaces already read from
+  `get_config().settings`; the older `ocr` / `compress` / `process`
+  commands and the single-file upload form do not.
 
 ## Known issues / tech debt
 
@@ -244,8 +203,8 @@ The three Phase 0 pipeline bugs are FIXED in Phase 2 items 1–3 (see
   defaults — `run_pipeline` does, but the surface-level Typer/
   Streamlit/Form defaults are still hardcoded. Phase 5 wires them in
   (settings UI, default output dir, oversize-policy surface).
-- **Phase 3 batch + Phase 4 API hardening + Phase 5 GUI catchup +
-  Phase 6 docs polish** all ahead. ROADMAP has the scope.
+- **Phase 4 API hardening + Phase 5 GUI catchup + Phase 6 docs
+  polish** all ahead. ROADMAP has the scope.
 
 ## Out of scope
 
