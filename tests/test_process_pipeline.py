@@ -1,9 +1,9 @@
-"""Tests for the process pipeline routing.
+"""CLI wiring tests: each subcommand calls run_pipeline with the right
+mode and forwards user-provided kwargs (preset, lang, force_ocr, etc.).
 
-Phase 2 / Design rule #3: never run a Ghostscript pass on OCRmyPDF output.
-The post-OCR pdfwrite step strips the /Font resources OCRmyPDF just wrote,
-silently destroying the text layer. OCRmyPDF gets `--optimize N` matching
-the requested preset and owns optimization end-to-end on the OCR branch.
+The behavior of run_pipeline itself is covered by tests/test_pipeline.py.
+These tests just lock in the CLI plumbing — that future edits to cli.py
+don't accidentally drop a kwarg or pick the wrong mode.
 """
 
 from pathlib import Path
@@ -11,92 +11,82 @@ from pathlib import Path
 import pytest
 
 from pdf_ocr_compress import cli as cli_mod
+from pdf_ocr_compress.core.pipeline import ProcessResult
 
 
 @pytest.fixture
-def stub_pipeline(monkeypatch, tmp_path):
-    """Replace run_ocr / do_compress / needs_ocr with call-recording stubs."""
-    calls: list[tuple[str, dict]] = []
+def stub_run_pipeline(monkeypatch):
+    """Replace cli.run_pipeline with a recorder. Returns the kwargs dict
+    captured on the most recent call.
+    """
+    captured: dict = {}
 
-    def fake_run_ocr(**kwargs):
-        calls.append(("run_ocr", kwargs))
-        out = kwargs["output_pdf"]
-        out.write_bytes(b"%PDF-1.4 ocr-output\n")
-        return out
-
-    def fake_compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced"):
-        calls.append(
-            (
-                "compress",
-                {"input_pdf": input_pdf, "output_pdf": output_pdf, "preset": preset},
-            )
+    def fake(input_pdf, output_pdf, **kwargs):
+        captured["input_pdf"] = input_pdf
+        captured["output_pdf"] = output_pdf
+        captured.update(kwargs)
+        return ProcessResult(
+            output_path=output_pdf,
+            input_bytes=100,
+            output_bytes=80,
+            pct_change=-20.0,
+            ocr_ran=kwargs.get("mode") == "ocr",
+            ocr_skipped_reason=None,
+            processing_seconds=0.01,
+            preset_actually_used=kwargs.get("preset", "smallest"),
+            pdfminer_text_extractable=True,
         )
-        output_pdf.write_bytes(b"%PDF-1.4 compress-output\n")
-        return output_pdf
 
-    monkeypatch.setattr(cli_mod, "run_ocr", fake_run_ocr)
-    monkeypatch.setattr(cli_mod, "do_compress", fake_compress)
-    return calls
+    monkeypatch.setattr(cli_mod, "run_pipeline", fake)
+    return captured
 
 
-def _make_input(tmp_path: Path) -> Path:
+def _input(tmp_path: Path) -> Path:
     inp = tmp_path / "in.pdf"
-    inp.write_bytes(b"%PDF-1.4 input\n")
+    inp.write_bytes(b"%PDF-1.4 fake\n")
     return inp
 
 
-def test_process_ocr_branch_does_not_compress(stub_pipeline, monkeypatch, tmp_path):
-    """When OCR runs, no Ghostscript compress pass should follow.
-
-    Bug fix proof: pre-fix, process called do_compress on run_ocr's output,
-    which stripped the /Font resources OCRmyPDF wrote. Now run_ocr writes
-    directly to the final path with --optimize matching the preset.
-    """
-    monkeypatch.setattr(cli_mod, "needs_ocr", lambda _: True)
-
-    inp = _make_input(tmp_path)
+def test_process_calls_pipeline_in_auto_mode(stub_run_pipeline, tmp_path):
+    """`pdf-ocr process` -> mode='auto' with all flags forwarded."""
+    inp = _input(tmp_path)
     out = tmp_path / "out.pdf"
-    cli_mod.process(inp, out, preset="smallest")
 
-    op_names = [c[0] for c in stub_pipeline]
-    assert op_names == ["run_ocr"], f"Expected only run_ocr; got {op_names}"
+    cli_mod.process(inp, out, lang="spa", preset="archival", force_ocr=True, jobs=2)
+
+    assert stub_run_pipeline["mode"] == "auto"
+    assert stub_run_pipeline["preset"] == "archival"
+    assert stub_run_pipeline["lang"] == "spa"
+    assert stub_run_pipeline["force_ocr"] is True
+    assert stub_run_pipeline["jobs"] == 2
+    assert stub_run_pipeline["input_pdf"] == inp
+    assert stub_run_pipeline["output_pdf"] == out
 
 
-def test_process_ocr_branch_targets_final_output(stub_pipeline, monkeypatch, tmp_path):
-    """OCR branch must write directly to the user's chosen output path,
-    not to an intermediate '<stem>.ocr.pdf' file.
-    """
-    monkeypatch.setattr(cli_mod, "needs_ocr", lambda _: True)
-
-    inp = _make_input(tmp_path)
+def test_ocr_subcommand_calls_pipeline_in_ocr_mode(stub_run_pipeline, tmp_path):
+    """`pdf-ocr ocr` -> mode='ocr' with force_ocr passed through."""
+    inp = _input(tmp_path)
     out = tmp_path / "out.pdf"
-    cli_mod.process(inp, out)
 
-    ocr_call = stub_pipeline[0]
-    assert ocr_call[0] == "run_ocr"
-    assert ocr_call[1]["output_pdf"] == out
+    cli_mod.ocr(inp, out, lang="eng", preset="smallest", force_ocr=False)
+
+    assert stub_run_pipeline["mode"] == "ocr"
+    assert stub_run_pipeline["preset"] == "smallest"
+    assert stub_run_pipeline["force_ocr"] is False
 
 
-def test_process_no_ocr_branch_only_compresses(stub_pipeline, monkeypatch, tmp_path):
-    """When the PDF already has text, only the compress path runs."""
-    monkeypatch.setattr(cli_mod, "needs_ocr", lambda _: False)
-
-    inp = _make_input(tmp_path)
+def test_compress_subcommand_calls_pipeline_in_compress_mode(
+    stub_run_pipeline, tmp_path
+):
+    """`pdf-ocr compress` -> mode='compress' (no OCR-related kwargs)."""
+    inp = _input(tmp_path)
     out = tmp_path / "out.pdf"
-    cli_mod.process(inp, out)
 
-    op_names = [c[0] for c in stub_pipeline]
-    assert op_names == ["compress"], f"Expected only compress; got {op_names}"
+    cli_mod.compress(inp, out, preset="balanced")
 
-
-def test_process_ocr_passes_preset_through(stub_pipeline, monkeypatch, tmp_path):
-    """The user-requested preset must reach run_ocr unchanged so OCRmyPDF
-    can pick the right --optimize level (archival=0, balanced=2, smallest=3).
-    """
-    monkeypatch.setattr(cli_mod, "needs_ocr", lambda _: True)
-
-    inp = _make_input(tmp_path)
-    out = tmp_path / "out.pdf"
-    cli_mod.process(inp, out, preset="archival")
-
-    assert stub_pipeline[0][1]["preset"] == "archival"
+    assert stub_run_pipeline["mode"] == "compress"
+    assert stub_run_pipeline["preset"] == "balanced"
+    # compress mode shouldn't pass language/jobs/force_ocr — keep the call
+    # surface narrow so changes to defaults don't leak in.
+    assert "lang" not in stub_run_pipeline
+    assert "force_ocr" not in stub_run_pipeline

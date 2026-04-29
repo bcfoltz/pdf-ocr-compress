@@ -4,9 +4,7 @@ from pathlib import Path
 
 import typer
 
-from .core.compress import compress as do_compress
-from .core.detect import needs_ocr
-from .core.ocr import run_ocr
+from .core.pipeline import run_pipeline
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -25,16 +23,17 @@ def ocr(
     force_ocr: bool = False,
 ):
     """Add a searchable text layer to scanned pages; writes a brand-new file."""
-    out = run_ocr(
-        input_pdf=input_pdf,
-        output_pdf=output_pdf,
+    result = run_pipeline(
+        input_pdf,
+        output_pdf,
+        mode="ocr",
         lang=lang,
         preset=preset,
         pdfa=pdfa,
         jobs=jobs,
         force_ocr=force_ocr,
     )
-    typer.echo(f"Output: {out}")
+    typer.echo(result.one_line_summary())
 
 
 @app.command()
@@ -44,8 +43,8 @@ def compress(
     preset: str = typer.Option("balanced", help="archival | balanced | smallest"),
 ):
     """Compress & linearize; writes a brand-new file."""
-    out = do_compress(input_pdf, output_pdf, preset=preset)
-    typer.echo(f"Output: {out}")
+    result = run_pipeline(input_pdf, output_pdf, mode="compress", preset=preset)
+    typer.echo(result.one_line_summary())
 
 
 @app.command()
@@ -61,28 +60,21 @@ def process(
     """
     Auto pipeline for scanned documents:
     - Detects if PDF pages need OCR (no searchable text)
-    - Runs OCR on scanned pages, then compresses
+    - Runs OCR on scanned pages with OCRmyPDF's --optimize matching preset
     - Skips OCR if text already exists (unless --force-ocr)
     - Optimized for scanned/image-based PDFs
     """
-    if force_ocr or needs_ocr(input_pdf):
-        # OCRmyPDF owns optimization on this branch via --optimize N matching
-        # the requested preset (archival=0, balanced=2, smallest=3). A second
-        # Ghostscript pass would strip the /Font resources OCRmyPDF just
-        # wrote, silently destroying the text layer (Phase 0 finding,
-        # codified as Design rule #3).
-        final_out = run_ocr(
-            input_pdf=input_pdf,
-            output_pdf=output_pdf,
-            lang=lang,
-            preset=preset,
-            pdfa=pdfa,
-            jobs=jobs,
-            force_ocr=True,
-        )
-    else:
-        final_out = do_compress(input_pdf, output_pdf, preset=preset)
-    typer.echo(f"Output: {final_out}")
+    result = run_pipeline(
+        input_pdf,
+        output_pdf,
+        mode="auto",
+        lang=lang,
+        preset=preset,
+        pdfa=pdfa,
+        jobs=jobs,
+        force_ocr=force_ocr,
+    )
+    typer.echo(result.one_line_summary())
 
 
 def main():
