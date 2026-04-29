@@ -109,9 +109,14 @@ def run_ocr(
             "--language",
             lang,
             "--rotate-pages",
-            "--tesseract-timeout",
-            str(settings.tesseract_timeout),
         ]
+
+        # `--tesseract-timeout SECONDS` is an upper bound, not "0 = unlimited"
+        # (OCRmyPDF >= 13). Passing 0 makes Tesseract give up immediately and
+        # emit an empty text layer. Treat tesseract_timeout <= 0 as "use
+        # OCRmyPDF's own default" by omitting the flag.
+        if settings.tesseract_timeout > 0:
+            args += ["--tesseract-timeout", str(settings.tesseract_timeout)]
 
         # OCR strategy
         args.append("--force-ocr" if force_ocr else "--skip-text")
