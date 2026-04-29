@@ -1,15 +1,18 @@
 """FastAPI server for PDF OCR + Compression REST API."""
 
+import os
 import shutil
 import tempfile
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from ..config import get_config
+from ..core.batch import BatchJobState, run_batch
 from ..core.pipeline import run_pipeline
 
 app = FastAPI(
@@ -25,6 +28,24 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 # File storage with cleanup (keep files for 1 hour)
 file_storage = {}
+
+# Phase 3 — in-memory batch job state. Phase 4 swaps for SQLite.
+batch_jobs: dict = {}
+
+
+def cleanup_old_jobs():
+    """Remove batch jobs older than 1 hour. Mirrors cleanup_old_files()."""
+    now = datetime.now()
+    expired = []
+    for job_id, state in batch_jobs.items():
+        try:
+            started = datetime.fromisoformat(state.started_at)
+        except (ValueError, AttributeError):
+            continue
+        if now - started > timedelta(hours=1):
+            expired.append(job_id)
+    for job_id in expired:
+        del batch_jobs[job_id]
 
 
 class ProcessResponse(BaseModel):
@@ -54,6 +75,32 @@ class ProcessResponse(BaseModel):
     preset_actually_used: str  # may differ from `preset` if oversize fallback fired
     pdfminer_text_extractable: bool
     pct_change: float  # negative = output shrunk; positive = output grew
+
+
+class BatchRequest(BaseModel):
+    """Request body for POST /api/batch.
+
+    Server-side folder path only — no upload. The folder must exist on the
+    machine running the API. Empty folders are accepted and produce a
+    zero-file report (matches CLI behavior).
+    """
+
+    folder: str
+    output_dir: str | None = None
+    mode: str = "auto"
+    preset: str | None = None
+    language: str | None = None
+    jobs: int | None = None
+    pdfa: bool = False
+    force_ocr: bool = False
+
+
+class BatchAcceptedResponse(BaseModel):
+    """202 Accepted body returned by POST /api/batch."""
+
+    status: str  # "queued"
+    job_id: str
+    total_files: int
 
 
 def cleanup_old_files():
@@ -218,6 +265,106 @@ async def download_file(file_id: str):
     return FileResponse(
         path=file_info["path"], media_type="application/pdf", filename=download_name
     )
+
+
+@app.post(
+    "/api/batch",
+    response_model=BatchAcceptedResponse,
+    status_code=202,
+)
+async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
+    """Queue a folder-batch job. Returns a job_id immediately; processing
+    runs in the background. Poll GET /api/batch/{job_id}/status for state.
+    """
+    cleanup_old_jobs()
+
+    if req.mode not in ["auto", "ocr", "compress"]:
+        raise HTTPException(status_code=400, detail=f"Invalid mode: {req.mode}")
+
+    folder = Path(req.folder)
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Folder does not exist or is not a directory: {req.folder}",
+        )
+
+    output_dir = (
+        Path(req.output_dir) if req.output_dir is not None else folder / "processed"
+    )
+    # If output_dir doesn't exist, its parent must be writable so we can mkdir.
+    target_for_writability_check = (
+        output_dir if output_dir.exists() else output_dir.parent
+    )
+    if not os.access(target_for_writability_check, os.W_OK):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Output dir (or its parent) is not writable: {output_dir}",
+        )
+
+    settings = get_config().settings
+    preset = req.preset if req.preset is not None else settings.default_preset
+    if preset not in ["archival", "balanced", "smallest"]:
+        raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+
+    language = req.language if req.language is not None else settings.default_language
+    jobs = req.jobs if req.jobs is not None else settings.default_jobs
+
+    pdfs = sorted(p for p in folder.glob("*.pdf") if p.is_file())
+    job_id = str(uuid.uuid4())
+    state = BatchJobState(
+        job_id=job_id,
+        status="queued",
+        started_at=datetime.now().isoformat(timespec="milliseconds"),
+        finished_at=None,
+        progress_current=0,
+        progress_total=len(pdfs),
+        report=None,
+        error_msg=None,
+    )
+    batch_jobs[job_id] = state
+
+    def _run() -> None:
+        state.status = "running"
+        try:
+
+            def cb(current: int, total: int, current_path: Path) -> None:
+                state.progress_current = current
+                state.progress_total = total
+
+            report = run_batch(
+                folder,
+                output_dir,
+                mode=req.mode,  # type: ignore[arg-type]
+                preset=preset,
+                lang=language,
+                jobs=jobs,
+                pdfa=req.pdfa,
+                force_ocr=req.force_ocr,
+                progress_callback=cb,
+            )
+            state.report = report
+            state.status = "done"
+        except (
+            Exception
+        ) as e:  # noqa: BLE001 — surface orchestrator-level errors to the client
+            state.status = "error"
+            state.error_msg = str(e)
+        finally:
+            state.finished_at = datetime.now().isoformat(timespec="milliseconds")
+
+    background_tasks.add_task(_run)
+
+    return BatchAcceptedResponse(status="queued", job_id=job_id, total_files=len(pdfs))
+
+
+@app.get("/api/batch/{job_id}/status")
+async def batch_status(job_id: str):
+    """Poll a batch job's state. Returns 404 if unknown or expired."""
+    cleanup_old_jobs()
+    state = batch_jobs.get(job_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="Batch job not found or expired")
+    return state.to_dict()
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8502):
