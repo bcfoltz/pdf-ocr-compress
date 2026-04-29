@@ -17,10 +17,12 @@ try:
     from .core.batch import run_batch
     from .core.detect import needs_ocr
     from .core.pipeline import run_pipeline
+    from .utils.errors import format_error_for_user
 except ImportError:
     from pdf_ocr_compress.core.batch import run_batch
     from pdf_ocr_compress.core.detect import needs_ocr
     from pdf_ocr_compress.core.pipeline import run_pipeline
+    from pdf_ocr_compress.utils.errors import format_error_for_user
 
 
 def setup_streamlit():
@@ -107,6 +109,23 @@ def _collect_local_folder_inputs(folder_str: str) -> dict:
         "pdf_count": len(pdfs),
         "total_bytes": total_bytes,
     }
+
+
+def _render_error(exc: Exception) -> None:
+    """Render any exception via Phase 4's user-friendly formatter.
+
+    Replaces ad-hoc `st.error(f"...{e}")` strings in the GUI. The
+    formatter (utils/errors.format_error_for_user) handles
+    PDFProcessingError / SystemToolError plus common Python exceptions
+    and falls back to a generic message for anything else.
+    """
+    user_msg, suggestions, error_code = format_error_for_user(exc)
+    st.error(user_msg)
+    if suggestions:
+        bullets = "\n".join(f"- {s}" for s in suggestions)
+        st.info(bullets)
+    if error_code:
+        st.caption(f"Error code: `{error_code}`")
 
 
 def _resolve_output_dir(
