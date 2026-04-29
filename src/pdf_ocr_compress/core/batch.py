@@ -163,11 +163,11 @@ def run_batch(
 ) -> BatchReport:
     """Process every *.pdf in input_dir and return a BatchReport.
 
-    Sequential loop calling run_pipeline() per file. Per-file successes
-    and failures (including retries — see Task 3) are recorded as
-    BatchResult entries; whole-batch summary fields are aggregated at
-    the end. Always writes <output_dir>/batch_report.json before
-    returning, even on a 0-file folder.
+    Failure ladder per file:
+      1. initial attempt
+      2. immediate retry on failure
+      3. (deferred) second-pass retry at end of batch for any file still failing
+    A file that fails all three is recorded with status='failed', attempts=3.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -176,12 +176,17 @@ def run_batch(
     start_t = time.time()
     total_input_bytes = sum(p.stat().st_size for p in pdfs)
 
-    results: list[BatchResult] = []
+    # Per-file outcomes after initial + immediate retry; the second-pass
+    # retry runs after the main loop. `pending_retry` is keyed by input
+    # path and carries the prior-attempt count + the most recent error.
+    successes: dict[Path, BatchResult] = {}
+    pending_retry: dict[Path, tuple[int, Exception]] = {}
 
     for i, pdf in enumerate(pdfs, start=1):
         if progress_callback:
             progress_callback(i, len(pdfs), pdf)
 
+        # Initial attempt
         result, error = _attempt_once(
             pdf,
             output_dir,
@@ -192,29 +197,82 @@ def run_batch(
             pdfa=pdfa,
             force_ocr=force_ocr,
         )
-        # Retry ladder is added in Task 3. For now: success = ok, failure = failed.
         if result is not None:
-            results.append(
-                BatchResult(
-                    input_path=pdf,
-                    output_path=result.output_path,
-                    status="ok",
-                    attempts=1,
-                    error_msg=None,
-                    process_result=result,
-                )
+            successes[pdf] = BatchResult(
+                input_path=pdf,
+                output_path=result.output_path,
+                status="ok",
+                attempts=1,
+                error_msg=None,
+                process_result=result,
+            )
+            continue
+
+        # Immediate retry
+        result, error = _attempt_once(
+            pdf,
+            output_dir,
+            mode=mode,
+            preset=preset,
+            lang=lang,
+            jobs=jobs,
+            pdfa=pdfa,
+            force_ocr=force_ocr,
+        )
+        if result is not None:
+            successes[pdf] = BatchResult(
+                input_path=pdf,
+                output_path=result.output_path,
+                status="ok",
+                attempts=2,
+                error_msg=None,
+                process_result=result,
+            )
+            continue
+
+        # Both attempts failed; defer to end-of-batch second pass.
+        pending_retry[pdf] = (2, error)  # type: ignore[assignment]
+
+    # End-of-batch second pass
+    final_failures: dict[Path, BatchResult] = {}
+    for pdf, (prior_attempts, _prior_error) in pending_retry.items():
+        result, error = _attempt_once(
+            pdf,
+            output_dir,
+            mode=mode,
+            preset=preset,
+            lang=lang,
+            jobs=jobs,
+            pdfa=pdfa,
+            force_ocr=force_ocr,
+        )
+        total_attempts = prior_attempts + 1
+        if result is not None:
+            successes[pdf] = BatchResult(
+                input_path=pdf,
+                output_path=result.output_path,
+                status="ok",
+                attempts=total_attempts,
+                error_msg=None,
+                process_result=result,
             )
         else:
-            results.append(
-                BatchResult(
-                    input_path=pdf,
-                    output_path=None,
-                    status="failed",
-                    attempts=1,
-                    error_msg=str(error),
-                    process_result=None,
-                )
+            final_failures[pdf] = BatchResult(
+                input_path=pdf,
+                output_path=None,
+                status="failed",
+                attempts=total_attempts,
+                error_msg=str(error),
+                process_result=None,
             )
+
+    # Combine in original input order so results follow folder order.
+    results: list[BatchResult] = []
+    for pdf in pdfs:
+        if pdf in successes:
+            results.append(successes[pdf])
+        else:
+            results.append(final_failures[pdf])
 
     finished_at = _now_iso()
     elapsed = time.time() - start_t

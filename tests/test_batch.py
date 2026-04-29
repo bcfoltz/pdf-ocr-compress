@@ -328,3 +328,125 @@ def test_run_batch_results_sorted_by_input_path(tmp_path, monkeypatch):
     report = batch_mod.run_batch(in_dir, out_dir)
 
     assert [r.input_path.name for r in report.results] == ["a.pdf", "b.pdf", "c.pdf"]
+
+
+def _flaky_pipeline_factory(tmp_path: Path, fails_per_file: dict[str, int]):
+    """Build a fake run_pipeline that fails the first N times for each
+    named file, then succeeds. fails_per_file maps filename -> N.
+    """
+    counters: dict[str, int] = {k: 0 for k in fails_per_file}
+
+    def fake(input_pdf, output_pdf, **kwargs):
+        name = Path(input_pdf).name
+        if name in fails_per_file:
+            counters[name] += 1
+            if counters[name] <= fails_per_file[name]:
+                raise RuntimeError(f"synthetic failure {counters[name]} on {name}")
+        out = output_pdf
+        Path(out).write_bytes(b"%PDF-1.4 fake\n")
+        return ProcessResult(
+            output_path=Path(out),
+            input_bytes=Path(input_pdf).stat().st_size,
+            output_bytes=Path(out).stat().st_size,
+            pct_change=-50.0,
+            ocr_ran=False,
+            ocr_skipped_reason="input_has_text_layer",
+            processing_seconds=0.01,
+            preset_actually_used="smallest",
+            pdfminer_text_extractable=True,
+        )
+
+    return fake, counters
+
+
+def test_run_batch_retries_once_on_first_failure(tmp_path, monkeypatch):
+    """A file that fails once but succeeds on immediate retry: attempts=2, ok."""
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    _make_pdf(in_dir / "flaky.pdf")
+
+    fake, counters = _flaky_pipeline_factory(tmp_path, {"flaky.pdf": 1})
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert report.succeeded == 1
+    assert report.failed == 0
+    assert report.results[0].attempts == 2
+    assert report.results[0].status == "ok"
+    assert counters["flaky.pdf"] == 2  # initial + immediate retry
+
+
+def test_run_batch_end_of_batch_retry_succeeds(tmp_path, monkeypatch):
+    """A file that fails initial + immediate-retry but succeeds on end-of-batch retry: attempts=3, ok."""
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    _make_pdf(in_dir / "stubborn.pdf")
+
+    fake, counters = _flaky_pipeline_factory(tmp_path, {"stubborn.pdf": 2})
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert report.succeeded == 1
+    assert report.failed == 0
+    assert report.results[0].attempts == 3
+    assert report.results[0].status == "ok"
+    assert counters["stubborn.pdf"] == 3
+
+
+def test_run_batch_final_failure_attempts_three(tmp_path, monkeypatch):
+    """A file that fails all three attempts: status=failed, attempts=3, error_msg populated."""
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    _make_pdf(in_dir / "doomed.pdf")
+
+    fake, counters = _flaky_pipeline_factory(tmp_path, {"doomed.pdf": 999})
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert report.succeeded == 0
+    assert report.failed == 1
+    r = report.results[0]
+    assert r.status == "failed"
+    assert r.attempts == 3
+    assert r.error_msg is not None
+    assert "synthetic failure" in r.error_msg
+    assert r.output_path is None
+    assert r.process_result is None
+    assert counters["doomed.pdf"] == 3
+
+
+def test_run_batch_one_bad_apple_does_not_kill_batch(tmp_path, monkeypatch):
+    """Mixed run: 2 ok, 1 doomed. Phase 3 success criterion."""
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    _make_pdf(in_dir / "a.pdf")
+    _make_pdf(in_dir / "b.pdf")
+    _make_pdf(in_dir / "doomed.pdf")
+
+    fake, _ = _flaky_pipeline_factory(tmp_path, {"doomed.pdf": 999})
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert report.total_files == 3
+    assert report.succeeded == 2
+    assert report.failed == 1
+    by_name = {r.input_path.name: r for r in report.results}
+    assert by_name["a.pdf"].status == "ok"
+    assert by_name["b.pdf"].status == "ok"
+    assert by_name["doomed.pdf"].status == "failed"
