@@ -156,19 +156,20 @@ async def process_pdf(
 
         else:  # auto
             if force_ocr or need_ocr:
-                # OCR first, then compress
-                ocr_output = run_ocr(
+                # OCRmyPDF owns optimization here via --optimize N keyed off
+                # preset (archival=0, balanced=2, smallest=3). A post-OCR
+                # Ghostscript pass would strip the /Font resources OCRmyPDF
+                # just wrote — see Design rule #3 in CLAUDE.md.
+                output_path = run_ocr(
                     input_pdf=input_path,
-                    output_pdf=workdir / "ocr.pdf",
+                    output_pdf=output_base,
                     lang=language,
                     preset=preset,
                     pdfa=pdfa,
                     jobs=jobs,
                     force_ocr=True,
                 )
-                output_path = run_compress(ocr_output, output_base, preset=preset)
             else:
-                # Just compress
                 output_path = run_compress(input_path, output_base, preset=preset)
 
         output_size = output_path.stat().st_size

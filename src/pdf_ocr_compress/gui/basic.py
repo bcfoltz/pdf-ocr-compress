@@ -222,18 +222,20 @@ def main():
                 else:
                     # Auto
                     if force_ocr or need_ocr:
-                        st.write("Step 1/2: OCR (no text detected or forced)")
-                        ocr_out = run_ocr(
+                        # OCRmyPDF owns optimization here (--optimize N keyed
+                        # off preset). A post-OCR Ghostscript pass would strip
+                        # the /Font resources OCRmyPDF just wrote — see
+                        # Design rule #3 in CLAUDE.md.
+                        st.write("Step 1/1: OCR (no text detected or forced)")
+                        produced_path = run_ocr(
                             input_pdf=in_path,
-                            output_pdf=workdir / "ocr.pdf",
+                            output_pdf=out_base,
                             lang=lang,
                             preset=preset,
                             pdfa=pdfa,
                             jobs=jobs,
                             force_ocr=True,
                         )
-                        st.write("Step 2/2: Compress")
-                        produced_path = run_compress(ocr_out, out_base, preset=preset)
                     else:
                         st.write("Step 1/1: Compress (text already present)")
                         produced_path = run_compress(in_path, out_base, preset=preset)

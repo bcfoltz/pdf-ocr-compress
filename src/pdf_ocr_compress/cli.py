@@ -66,22 +66,20 @@ def process(
     - Optimized for scanned/image-based PDFs
     """
     if force_ocr or needs_ocr(input_pdf):
-        ocr_out = run_ocr(
+        # OCRmyPDF owns optimization on this branch via --optimize N matching
+        # the requested preset (archival=0, balanced=2, smallest=3). A second
+        # Ghostscript pass would strip the /Font resources OCRmyPDF just
+        # wrote, silently destroying the text layer (Phase 0 finding,
+        # codified as Design rule #3).
+        final_out = run_ocr(
             input_pdf=input_pdf,
-            output_pdf=output_pdf.with_name(output_pdf.stem + ".ocr.pdf"),
+            output_pdf=output_pdf,
             lang=lang,
             preset=preset,
             pdfa=pdfa,
             jobs=jobs,
             force_ocr=True,
         )
-        try:
-            final_out = do_compress(ocr_out, output_pdf, preset=preset)
-        finally:
-            try:
-                ocr_out.unlink(missing_ok=True)
-            except OSError:
-                pass
     else:
         final_out = do_compress(input_pdf, output_pdf, preset=preset)
     typer.echo(f"Output: {final_out}")
