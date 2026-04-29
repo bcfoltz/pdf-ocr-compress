@@ -3,9 +3,11 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import uuid
 from datetime import datetime
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
@@ -148,10 +150,82 @@ async def root():
     }
 
 
+def _detect_ghostscript() -> str | None:
+    """Find a Ghostscript binary on PATH. Returns the absolute path or None."""
+    # Mirrors core.compress._gs_exe's preference order, but tolerates
+    # absence (this endpoint reports state; it never raises).
+    for candidate in ("gswin64c", "gswin32c", "gs"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return None
+
+
+def _detect_tesseract() -> str | None:
+    """Find the Tesseract binary on PATH. Returns absolute path or None."""
+    return shutil.which("tesseract")
+
+
+def _tesseract_languages(tesseract_path: str | None) -> list[str]:
+    """Return the list of installed Tesseract language packs.
+
+    Calls `tesseract --list-langs`; the first line is a header
+    ("List of available languages (N):"), remaining lines are codes.
+    Empty list on any failure (binary missing, parse error, timeout).
+    """
+    if tesseract_path is None:
+        return []
+    try:
+        result = subprocess.run(
+            [tesseract_path, "--list-langs"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    # Tesseract emits the list on stderr in some builds, stdout in others.
+    output = result.stdout or result.stderr or ""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    # First line is the header; everything else is a language code.
+    return [line for line in lines[1:] if not line.startswith("List of")]
+
+
+def _api_version() -> str:
+    """Resolve the package version via importlib.metadata.
+
+    Falls back to the FastAPI `app.version` string if the package is
+    running from source without an installed dist (`pip install -e`
+    installs metadata, so this should rarely fire in practice).
+    """
+    try:
+        return importlib_metadata.version("pdf-ocr-compress")
+    except importlib_metadata.PackageNotFoundError:
+        return app.version
+
+
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "pdf-ocr-compress-api"}
+    """Health check endpoint.
+
+    Phase 4 — reports environment state so a monitoring system can
+    distinguish "API up" from "API up but Tesseract missing". Fields:
+    `version` (pdf-ocr-compress version), `ghostscript_binary` and
+    `tesseract_binary` (absolute paths or null), `tesseract_languages`
+    (installed language codes), `queue_depth` (count of queued/running
+    batch jobs).
+    """
+    tess = _detect_tesseract()
+    return {
+        "status": "healthy",
+        "service": "pdf-ocr-compress-api",
+        "version": _api_version(),
+        "ghostscript_binary": _detect_ghostscript(),
+        "tesseract_binary": tess,
+        "tesseract_languages": _tesseract_languages(tess),
+        "queue_depth": _storage().queue_depth(),
+    }
 
 
 @app.post("/api/process", response_model=ProcessResponse)
