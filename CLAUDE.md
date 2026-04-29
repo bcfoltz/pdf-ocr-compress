@@ -98,15 +98,17 @@ None. There is no `.env`, no API keys, no remote services.
 ```text
 src/pdf_ocr_compress/
 ├── core/                # The pipeline — all three surfaces call into here
-│   ├── ocr.py           # OCRmyPDF wrapper (run_ocr)
-│   ├── compress.py      # Ghostscript + pikepdf compression / linearization
-│   └── detect.py        # pdfminer-based "does this PDF need OCR?" heuristic
-├── cli.py               # Typer CLI — commands: ocr, compress, process
+│   ├── pipeline.py      # run_pipeline(input, output, *, mode, ...) -> ProcessResult
+│   ├── ocr.py           # OCRmyPDF wrapper (run_ocr); applies oversize guard
+│   ├── compress.py      # Ghostscript + pikepdf compression; applies oversize guard
+│   ├── detect.py        # pikepdf-based "does this PDF need OCR?" heuristic
+│   └── oversize.py      # enforce_oversize_policy — the size-invariant guard
+├── cli.py               # Typer CLI — commands: ocr, compress, process (all -> run_pipeline)
 ├── gui/
 │   ├── __init__.py      # main_gui() launcher (used by `pdf-ocr-gui` script)
-│   └── basic.py         # The Streamlit app — THE ONLY GUI
+│   └── basic.py         # The Streamlit app — THE ONLY GUI (calls run_pipeline)
 ├── api/
-│   └── server.py        # FastAPI server — /api/process, /api/download/{id}, /health
+│   └── server.py        # FastAPI server — /api/process (calls run_pipeline), /api/download/{id}, /health
 ├── config/
 │   └── settings.py      # Single flat AppSettings dataclass + ConfigManager
 └── utils/
@@ -125,7 +127,7 @@ Top-level directories worth knowing:
 
 - **Never overwrite originals.** Every operation writes a brand-new timestamped file and returns its path. Output naming convention: `_ocr_{timestamp}.pdf`, `_processed_{timestamp}.pdf`, `_compressed_{timestamp}.pdf`.
 - **Collision-safe paths.** `utils.file_utils.unique_output_path` is the single source of truth — microsecond-resolution timestamp plus integer counter fallback. Both `core/compress.py` and `core/ocr.py` import it. Don't reintroduce per-module copies.
-- **Three surfaces, one pipeline.** CLI, GUI, and API all call `core.ocr.run_ocr` / `core.compress.compress` / `core.detect.needs_ocr`. Changing any of those signatures means updating `cli.py`, `gui/basic.py`, **and** `api/server.py`.
+- **Three surfaces, one pipeline.** CLI, GUI, and API all call `core.pipeline.run_pipeline(input, output, *, mode, ...)` and surface its `ProcessResult` (size deltas, OCR routing, preset_actually_used, pdfminer text-extractability check, processing_seconds). Routing logic and the structured report live in `core/pipeline.py` only — don't reintroduce per-surface routing.
 - **Defaults flow from config.** `core.ocr.run_ocr` reads defaults from `config.get_config().settings` when its parameters are `None`. Preserve that pattern when extending. (CLI/GUI/API still hardcode their own defaults — wiring them into settings is Phase 5.)
 - **Quality presets:** `archival` | `balanced` | `smallest` (default). Defined in `core/compress.py:_gs_args_for_preset`.
 - **Cross-platform Ghostscript binary lookup.** `core/compress.py:_gs_exe()` tries `gswin64c` → `gswin32c` → `gs` and raises `SystemToolError("ghostscript", ...)` if none are found. Don't hard-code, and don't catch the precheck error to silently substitute a default.
@@ -133,57 +135,106 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-**Phase 1 complete.** Foundation is in place:
+**Phase 2 items 1–4 complete (2026-04-29).** All three Phase 0 bugs
+are fixed and the structured output report is plumbed through every
+surface. Items 5 & 6 are the only remaining Phase 2 work.
 
-- Settings rebuilt as a single flat `AppSettings` dataclass with
-  `default_preset="smallest"`, `oversize_policy="fallback"`, and an
-  env-var override for each field. Old `UISettings` / `SystemSettings`
-  / `temp_settings()` deleted.
-- `_unique_name` collision bug fixed by consolidating three near-
-  duplicate helpers into `utils.file_utils.unique_output_path` (now
-  microsecond-stamped). `core/compress.py` and `core/ocr.py` both
-  import it.
-- `_gs_exe()` raises `SystemToolError("ghostscript", ...)` when no
-  Ghostscript binary is on PATH, instead of returning `"gswin64c"`
-  and letting subprocess fail with a cryptic `[WinError 2]`.
-- Dockerfile now does `pip install .` so the image picks up
-  `pyproject.toml` floors instead of drifting against inline pins.
+**Phase 2 deliverables landed:**
 
-**Pick up at Phase 2 (Pipeline rethink)** — see `ROADMAP.md`. That
-phase fixes the three confirmed Phase 0 bugs: rewrite `needs_ocr`
-on pikepdf, drop the post-OCR Ghostscript pass, and enforce the
-size invariant.
+- **Item 1 (`be2cc72`)** — `core/detect.needs_ocr` rewritten on
+  pikepdf. Opens with the tolerant parser; checks first 5 pages for
+  any `/Font` resource. Fixes Sample B's pdfminer-strict false-
+  positive. 4 tests including a monkeypatch-based "doesn't depend on
+  pdfminer" proof.
+- **Item 2 (`d0793ea`)** — post-OCR Ghostscript pass dropped from CLI,
+  GUI, and API. OCRmyPDF now owns optimization via `--optimize N`
+  matching preset (archival=0, balanced=2, smallest=3, plus
+  `--jbig2-lossy` on smallest). 4 mocked tests.
+- **Item 3 (`fcfdc8f`)** — `oversize_policy` actually enforced. New
+  `core/oversize.py` with `enforce_oversize_policy(input, output,
+  policy, *, can_retry, retry_with_smallest)`. `compress()` and
+  `run_ocr()` both call it via a private `_enforce_oversize=True`
+  kwarg; the retry recurses with `_enforce_oversize=False` to break
+  the loop. 9 tests.
+- **Item 4 (`5822209`, `afc062c`, `ce28a5f`, `9a12709`)** — the
+  structured output report. Sub-itemized 4a/4b/4c/4d:
+  - **4a** core: `ProcessResult` dataclass + `run_pipeline` in
+    `core/pipeline.py`. `enforce_oversize_policy` got an `outcome`
+    OUT-parameter dict; `compress()` and `run_ocr()` got a `_result`
+    OUT-parameter dict that resolves `preset_used` (`"passthrough"` /
+    `"smallest"` / requested) so `preset_actually_used` is precise
+    even when the fallback fired. 15 new tests.
+  - **4b** CLI three subcommands now call `run_pipeline` exclusively;
+    output is `ProcessResult.one_line_summary()`.
+  - **4c** API `/api/process` switched; `ProcessResponse` gained 5
+    new fields (`ocr_ran`, `ocr_skipped_reason`, `preset_actually_used`,
+    `pdfminer_text_extractable`, `pct_change`) — additive, backward
+    compatible.
+  - **4d** GUI three-mode switch; success banner shows the structured
+    report, with a yellow warning if pdfminer can't extract text and a
+    JSON expander for the full report.
 
-Earlier on this branch: Phase 0 benchmarks (`BENCHMARKS.md`,
-commit `1cc420e`); modernization Batches A–E (`fa81517`..`1428564`).
+**Tests:** 51 passing (was 21 at end of Phase 1). Black + ruff clean.
+
+**"Three surfaces, one pipeline" is now actually true** — CLI, GUI,
+and API all call exactly `core.pipeline.run_pipeline()` and surface
+the same `ProcessResult`. Routing logic lives in one place.
+
+**Pick up at Phase 2 items 5 & 6** — see `ROADMAP.md` Phase 2 section:
+
+- **Item 5 — pipeline-branch fixture tests:** PDFs covering the three
+  branches (already-has-text → compress-only path, image-only → OCR +
+  integrated optimization path, every-preset-grows → passthrough
+  path). Will exercise `run_pipeline` end-to-end. Real-Ghostscript /
+  real-Tesseract paths mark with `@requires_ghostscript` /
+  `@requires_tesseract` skipif (the existing pattern in
+  `tests/test_compress.py` is the model).
+- **Item 6 — text-fidelity round-trip test:** marked
+  `@requires_ghostscript @requires_tesseract`. Run a small text-
+  bearing PDF through `run_pipeline(mode="auto")`, assert pdfminer
+  extracts the same approximate token count ±10%, non-empty, not all
+  `\f`. Operationalizes "output is RAG-usable."
+
+After items 5 & 6, Phase 2 closes and the next phase is Phase 3
+(folder-input batch mode) — see `ROADMAP.md`.
+
+**Honest gaps to remember on resume:**
+
+- The Streamlit GUI was not click-through tested in a browser after
+  4d. Phase 5 explicitly covers browser testing; not regressing
+  Phase 2 deliverables.
+- The API endpoint has no `httpx`-based test yet. Phase 4 slates
+  `tests/api_smoke.sh` for this.
+- `text_pdf` fixture in `tests/conftest.py` is ~700 bytes — fine for
+  needs_ocr unit tests, but item 5/6 may want bigger fixtures
+  (multi-page text PDF, single-page image-only PDF). Build them in
+  the same conftest if needed.
+
+**Earlier on this branch:** Phase 1 (`80ea6ae`); Phase 0 benchmarks
+(`BENCHMARKS.md`, commit `1cc420e`); modernization Batches A–E
+(`fa81517`..`1428564`).
 
 ## Known issues / tech debt
 
-All slated for Phase 2 (pipeline rethink) — see `ROADMAP.md`.
+The three Phase 0 pipeline bugs are FIXED in Phase 2 items 1–3 (see
+"Where I left off"). Remaining items below.
 
-- **`--force-ocr` produces unusable output.** Verified on Sample A
-  (B&W book scan): 11+ minutes of Tesseract work followed by the
-  `balanced` Ghostscript pass destroys the OCR text layer (no
-  `/Font` resources on output pages). Drop the post-OCR Ghostscript
-  pass; let OCRmyPDF own optimization. Codified as Design rule #3.
-- **`needs_ocr` false-positives on pdfminer-strict PDFs.** Verified
-  on Sample B (color textbook scan): pdfminer raises
-  `PDFSyntaxError` on a file pikepdf reads fine; `detect.py` catches
-  the exception and returns `True`, triggering a useless multi-hour
-  OCR pass. Switch the existence probe to pikepdf. Codified as
-  Design rule #2.
-- **Output can exceed input size.** Verified: `archival` triples
-  Sample A (3.07×), `balanced` adds 34%. The settings model now
-  carries `oversize_policy` but the pipeline does not yet honor it.
-  Codified as Design rule #1.
 - **Starlette 1.0 major bump unverified at runtime.** Imports cleanly
-  but no `/api/process` request exercised. Phase 4 fix.
-- **GUI not click-through tested in a browser.** Phase 5.
-- **CLI/GUI/API hardcode their own defaults.** They don't yet read from
-  `config.get_config()`. Phase 5 wires them in (settings UI, default
-  output dir, oversize-policy surface).
-- **Test suite is minimal.** Phase 2/3 add coverage for `needs_ocr`,
-  batch, text-fidelity round-trip.
+  but no `/api/process` request exercised in a test. Phase 4 fix
+  (`tests/api_smoke.sh`).
+- **GUI not click-through tested in a browser.** Phase 5. The 4d
+  refactor swapped the routing block but no manual smoke test was
+  performed.
+- **CLI/GUI/API hardcode their own defaults.** They don't yet read
+  from `config.get_config()` for things like preset/jobs/lang
+  defaults — `run_pipeline` does, but the surface-level Typer/
+  Streamlit/Form defaults are still hardcoded. Phase 5 wires them in
+  (settings UI, default output dir, oversize-policy surface).
+- **Phase 2 items 5 & 6 still to do.** Pipeline-branch fixture tests
+  and text-fidelity round-trip (`@requires_ghostscript` /
+  `@requires_tesseract`). See "Where I left off."
+- **Phase 3 batch + Phase 4 API hardening + Phase 6 docs polish** all
+  ahead. ROADMAP has the scope.
 
 ## Out of scope
 

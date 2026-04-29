@@ -7,8 +7,9 @@ work, gated on the prior one. Pick up at the next non-completed phase.
 ## Status
 
 - [x] **Phase 0 — Investigate** (2026-04-28/29) — see `BENCHMARKS.md`
-- [ ] **Phase 1 — Foundation**
-- [ ] **Phase 2 — Pipeline rethink**
+- [x] **Phase 1 — Foundation** (2026-04-29) — commit `80ea6ae`
+- [~] **Phase 2 — Pipeline rethink** — items 1–4 done (2026-04-29);
+  items 5 & 6 still to do
 - [ ] **Phase 3 — Batch**
 - [ ] **Phase 4 — API hardening**
 - [ ] **Phase 5 — GUI catchup**
