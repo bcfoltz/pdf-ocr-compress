@@ -5,8 +5,10 @@ from subprocess import CalledProcessError, run
 
 import pikepdf
 
+from ..config import get_config
 from ..utils.errors import SystemToolError
 from ..utils.file_utils import unique_output_path
+from .oversize import enforce_oversize_policy
 
 
 def _gs_exe() -> str:
@@ -97,11 +99,22 @@ def linearize(src: Path, dst: Path) -> Path:
     return dst
 
 
-def compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Path:
+def compress(
+    input_pdf: Path,
+    output_pdf: Path,
+    preset: str = "balanced",
+    *,
+    _enforce_oversize: bool = True,
+) -> Path:
     """
     Full compress pipeline that ALWAYS produces a fresh file and returns its path.
     No in-place writes; no overwrites. The user's requested output filename is
     honored (only altered if it collides with the input or an existing file).
+
+    `_enforce_oversize` is private: when True (default), the configured
+    oversize_policy is applied at the end (Design rule #1, output ≤ input).
+    The policy's "fallback retry" recurses with _enforce_oversize=False to
+    avoid an infinite loop.
     """
     # Resolve the final output path up front so the user's chosen name is honored.
     if output_pdf.resolve() == input_pdf.resolve() or output_pdf.exists():
@@ -124,4 +137,23 @@ def compress(input_pdf: Path, output_pdf: Path, preset: str = "balanced") -> Pat
         except Exception:
             pass
 
-    return output_pdf
+    if not _enforce_oversize:
+        return output_pdf
+
+    # 4) Oversize-policy guard: per Design rule #1, output ≤ input. If the
+    # configured policy is "fallback" and the chosen preset grew the file,
+    # retry with "smallest"; if that also grows it, copy input verbatim.
+    policy = get_config().settings.oversize_policy
+
+    def _retry_smallest() -> Path:
+        return compress(
+            input_pdf, output_pdf, preset="smallest", _enforce_oversize=False
+        )
+
+    return enforce_oversize_policy(
+        input_pdf,
+        output_pdf,
+        policy,
+        can_retry=(preset != "smallest"),
+        retry_with_smallest=_retry_smallest,
+    )

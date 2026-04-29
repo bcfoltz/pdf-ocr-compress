@@ -8,6 +8,7 @@ from ..config import get_config
 from ..utils.errors import PDFProcessingError, SystemToolError
 from ..utils.file_utils import unique_output_path
 from ..utils.logging_config import get_logger, get_performance_logger
+from .oversize import enforce_oversize_policy
 
 logger = get_logger("ocr")
 perf_logger = get_performance_logger("ocr")
@@ -28,10 +29,17 @@ def run_ocr(
     pdfa: bool = None,
     jobs: int = None,
     force_ocr: bool = None,
+    *,
+    _enforce_oversize: bool = True,
 ) -> Path:
     """
     Runs OCRmyPDF and returns the NEW output path created.
     Never writes in place; never overwrites existing files.
+
+    `_enforce_oversize` is private: when True (default), the configured
+    oversize_policy is applied at the end (Design rule #1, output ≤ input).
+    The policy's "fallback retry" recurses with _enforce_oversize=False to
+    avoid an infinite loop.
     """
     # Get configuration defaults
     settings = get_config().settings
@@ -158,7 +166,35 @@ def run_ocr(
         )
 
         logger.info(f"OCR processing completed in {duration:.1f}s: {output_pdf.name}")
-        return output_pdf
+
+        if not _enforce_oversize:
+            return output_pdf
+
+        # Oversize-policy guard: per Design rule #1, output ≤ input. On
+        # "fallback", retry with --optimize 3 (preset=smallest) if we
+        # weren't already using it; if smallest also grows the file, copy
+        # input verbatim. The retry is a full re-run of OCRmyPDF, which is
+        # expensive — that's the documented cost of opting into "fallback"
+        # for the OCR branch.
+        def _retry_smallest() -> Path:
+            return run_ocr(
+                input_pdf=input_pdf,
+                output_pdf=output_pdf,
+                lang=lang,
+                preset="smallest",
+                pdfa=pdfa,
+                jobs=jobs,
+                force_ocr=force_ocr,
+                _enforce_oversize=False,
+            )
+
+        return enforce_oversize_policy(
+            input_pdf,
+            output_pdf,
+            settings.oversize_policy,
+            can_retry=(preset != "smallest"),
+            retry_with_smallest=_retry_smallest,
+        )
 
     except CalledProcessError as e:
         duration = time.time() - start_time
