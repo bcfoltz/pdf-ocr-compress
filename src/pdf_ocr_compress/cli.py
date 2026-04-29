@@ -75,7 +75,13 @@ def process(
             jobs=jobs,
             force_ocr=True,
         )
-        final_out = do_compress(ocr_out, output_pdf, preset=preset)
+        try:
+            final_out = do_compress(ocr_out, output_pdf, preset=preset)
+        finally:
+            try:
+                ocr_out.unlink(missing_ok=True)
+            except OSError:
+                pass
     else:
         final_out = do_compress(input_pdf, output_pdf, preset=preset)
     typer.echo(f"Output: {final_out}")
