@@ -14,9 +14,11 @@ if __name__ == "__main__" and __package__ is None:
 import streamlit as st
 
 try:
+    from .core.batch import run_batch
     from .core.detect import needs_ocr
     from .core.pipeline import run_pipeline
 except ImportError:
+    from pdf_ocr_compress.core.batch import run_batch
     from pdf_ocr_compress.core.detect import needs_ocr
     from pdf_ocr_compress.core.pipeline import run_pipeline
 
@@ -296,6 +298,133 @@ def main():
         finally:
             # Temp dir stays for the session; manual cleanup is fine for very large outputs.
             pass
+
+    # --- Batch upload section ---
+    st.divider()
+    st.subheader("📦 Batch: process multiple PDFs at once")
+    st.caption(
+        "Drop several PDFs; each is processed with the same settings. A "
+        "batch_report.json summarizing every file is downloadable when done."
+    )
+
+    batch_uploads = st.file_uploader(
+        "Drop multiple PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="batch_uploader",
+    )
+
+    batch_btn = st.button(
+        "Process batch",
+        type="primary",
+        disabled=not batch_uploads,
+        key="batch_run",
+    )
+
+    if batch_btn and batch_uploads:
+        batch_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_batch_"))
+        batch_in = batch_workdir / "input"
+        batch_out = batch_workdir / "output"
+        batch_in.mkdir()
+
+        # Persist uploads to disk (chunked).
+        for uf in batch_uploads:
+            _chunk_copy(uf, batch_in / uf.name)
+
+        pipeline_mode = {
+            "OCR only": "ocr",
+            "Compress only": "compress",
+        }.get(mode, "auto")
+
+        progress_bar = st.progress(0.0, text="Starting batch…")
+        live_table = st.empty()
+        rows: list[dict] = []
+
+        def _cb(current: int, total: int, current_path: Path) -> None:
+            progress_bar.progress(
+                min(current / max(total, 1), 1.0),
+                text=f"{current}/{total} — {current_path.name}",
+            )
+            rows.append(
+                {"file": current_path.name, "status": "processing", "delta": "—"}
+            )
+            live_table.dataframe(rows, hide_index=True)
+
+        try:
+            with st.status("Running batch…", expanded=True) as status:
+                report = run_batch(
+                    batch_in,
+                    batch_out,
+                    mode=pipeline_mode,
+                    preset=preset,
+                    lang=lang,
+                    jobs=jobs,
+                    pdfa=pdfa,
+                    force_ocr=force_ocr,
+                    progress_callback=_cb,
+                )
+                progress_bar.progress(1.0, text="Done")
+                status.update(label="Batch complete ✅", state="complete")
+        except Exception as e:
+            st.error(f"Batch failed at the orchestrator level: {e}")
+            st.stop()
+
+        # Final results table
+        final_rows = []
+        for r in report.results:
+            if r.status == "ok" and r.process_result is not None:
+                pct = r.process_result.pct_change
+                sign = "-" if pct < 0 else "+"
+                final_rows.append(
+                    {
+                        "file": r.input_path.name,
+                        "status": "ok",
+                        "delta": f"{sign}{abs(pct):.1f}%",
+                        "attempts": r.attempts,
+                        "error": "",
+                    }
+                )
+            else:
+                final_rows.append(
+                    {
+                        "file": r.input_path.name,
+                        "status": "FAILED",
+                        "delta": "—",
+                        "attempts": r.attempts,
+                        "error": r.error_msg or "",
+                    }
+                )
+        live_table.dataframe(final_rows, hide_index=True)
+
+        st.success(report.one_line_summary())
+
+        # Per-file download buttons (successful files only)
+        for r in report.results:
+            if (
+                r.status == "ok"
+                and r.output_path is not None
+                and r.output_path.exists()
+            ):
+                with open(r.output_path, "rb") as f:
+                    st.download_button(
+                        f"⬇️ Download {r.input_path.name}",
+                        data=f.read(),
+                        file_name=r.output_path.name,
+                        mime="application/pdf",
+                        key=f"dl_{r.input_path.name}",
+                    )
+
+        # Batch report download
+        report_path = batch_out / "batch_report.json"
+        if report_path.exists():
+            with open(report_path, "rb") as f:
+                st.download_button(
+                    "⬇️ Download batch_report.json",
+                    data=f.read(),
+                    file_name="batch_report.json",
+                    mime="application/json",
+                    key="dl_batch_report",
+                )
 
 
 if __name__ == "__main__":
