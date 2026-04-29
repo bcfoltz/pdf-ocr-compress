@@ -45,13 +45,31 @@ Ghostscript must be on PATH for the OCR steps. Record results inline
 - [ ] Type the absolute path to the same PDF. The "Selected:" line
       shows correct name + size.
 - [ ] Click "Process". Same banner / saved-to / download behavior.
+- [ ] **Real-world load-bearing case**: point local-path mode at one
+      of the multi-GB ScanSnap textbook scans (e.g. the Longenecker
+      sample). Verify the GUI doesn't choke on the size and the
+      pipeline runs end-to-end. This is the workflow shape the
+      project is designed for; the upload mode physically can't
+      handle it.
 
 ## Friendly error display
 
+- [ ] In local-path mode, type a path that doesn't exist (e.g.
+      `C:\does\not\exist.pdf`). Click "Process". A friendly
+      `FILE_NOT_FOUND` error renders via `_render_error` (headline +
+      suggestions + `Error code:` caption). This was previously a
+      bare `st.error` line; verify the change took.
 - [ ] In local-path mode, type a path to a non-PDF file (e.g. a
       `.txt`). Click "Process". An `st.error` headline + suggestions
       bullets + `Error code:` caption appear. No raw traceback is
       shown to the user.
+- [ ] **Unwritable `default_output_dir`**: temporarily set
+      `Default output directory` to a path you can't write to (e.g.
+      `C:\Windows\System32\__readonly_test\` on a non-admin account,
+      or any read-only mount). Save. Run a single-file process. The
+      yellow warning surfaces with the path AND the OS error reason
+      (e.g. `[WinError 5] Access is denied`). Output still lands
+      successfully in a tempdir. Restore the setting after.
 - [ ] (Optional, slow) Temporarily PATH-strip Tesseract or rename
       `gswin64c.exe`. Run a flow that needs it. Verify the friendly
       error has tool-installation suggestions.
@@ -73,14 +91,30 @@ Ghostscript must be on PATH for the OCR steps. Record results inline
 - [ ] Click "Process batch". Progress bar advances; live table
       populates.
 - [ ] When `Default output directory` is set: outputs land in
-      `<default_output_dir>/batch_YYYYMMDD-HHMMSS/`. The "📂 Outputs
-      in:" caption shows that subfolder.
+      `<default_output_dir>/batch_YYYYMMDD-HHMMSS-fff/`. The "📂
+      Outputs in:" caption shows that subfolder.
 - [ ] When `Default output directory` is unset: outputs land in
       `<input_folder>/processed/`.
 - [ ] No per-file download buttons in folder mode (correct — outputs
       already on disk).
 - [ ] `batch_report.json` download works and contains correct per-
       file status entries.
+- [ ] **Two consecutive batches into the same `default_output_dir`**:
+      with the setting still pointing at your smoke folder, run two
+      back-to-back batches (re-click "Process batch" immediately).
+      Confirm both runs land in distinct
+      `batch_YYYYMMDD-HHMMSS-fff/` subfolders — i.e. neither run
+      clobbers the other's `batch_report.json`. The microsecond
+      suffix is what makes this safe.
+
+## Tempdir audit (post-failure)
+
+- [ ] After running the friendly-error tests above (which deliberately
+      crash the pipeline), open `%TEMP%` (Windows) or `/tmp`
+      (Unix) and look for orphaned `pdfgui_*`, `pdfgui_in_*`, or
+      `pdfgui_batch_*` directories. They're expected to leak on
+      failure today (deferred in Phase 5; see CLAUDE.md "Honest gaps
+      after Phase 5"). Note any size that surprised you.
 
 ## Tear-down
 

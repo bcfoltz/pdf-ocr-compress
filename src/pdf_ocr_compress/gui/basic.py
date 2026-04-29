@@ -230,39 +230,42 @@ def _render_defaults_panel(cfg) -> None:
 
 def _resolve_output_dir(
     cfg, override: Path | None, fallback_factory
-) -> tuple[Path, str]:
+) -> tuple[Path, str, OSError | None]:
     """Resolve where output files go, in priority order.
 
-    Returns (path, source) where source is one of:
+    Returns (path, source, detail) where source is one of:
       - "override":                   user-typed explicit path was used
       - "setting":                    cfg.settings.default_output_dir was used
       - "fallback":                   default_output_dir unset; factory used
       - "fallback_after_unwritable":  default_output_dir set but mkdir raised
+    `detail` is the captured OSError on the unwritable branch (so the
+    caller can surface str(exc) in the warning) and None otherwise.
 
     Caller decides whether to surface a "Saved to:" line, a one-shot
     warning about an unhonored setting, etc.
     """
     if override is not None:
-        return _ensure_writable(override), "override"
+        return _ensure_writable(override), "override", None
 
     setting = cfg.settings.default_output_dir
     if setting is not None:
         try:
-            return _ensure_writable(Path(setting)), "setting"
-        except OSError:
-            return fallback_factory(), "fallback_after_unwritable"
+            return _ensure_writable(Path(setting)), "setting", None
+        except OSError as exc:
+            return fallback_factory(), "fallback_after_unwritable", exc
 
-    return fallback_factory(), "fallback"
+    return fallback_factory(), "fallback", None
 
 
 def _timestamped_batch_subdir(base: Path) -> Path:
-    """Wrap `base` in a `batch_YYYYMMDD-HHMMSS/` subfolder.
+    """Wrap `base` in a `batch_YYYYMMDD-HHMMSS-fff/` subfolder.
 
     Used in batch mode when the output dir comes from
     cfg.settings.default_output_dir to prevent batch_report.json
-    collisions across consecutive runs.
+    collisions across consecutive runs. Microsecond resolution
+    eliminates collisions when two batches start in the same second.
     """
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     sub = base / f"batch_{stamp}"
     sub.mkdir(parents=True, exist_ok=True)
     return sub
@@ -389,7 +392,7 @@ def main():
         # Resolve where the produced file should land. _resolve_output_dir
         # honors cfg.settings.default_output_dir when set; otherwise a fresh
         # tempdir is created.
-        out_dir, out_source = _resolve_output_dir(
+        out_dir, out_source, out_detail = _resolve_output_dir(
             cfg,
             override=None,
             fallback_factory=lambda: Path(tempfile.mkdtemp(prefix="pdfgui_")),
@@ -410,7 +413,7 @@ def main():
         else:
             in_path = Path(local_path_str).expanduser()
             if not (in_path.exists() and in_path.is_file()):
-                st.error("Local file not found. Please check the path.")
+                _render_error(FileNotFoundError(str(in_path)))
                 st.stop()
             in_stem = in_path.stem
 
@@ -419,7 +422,8 @@ def main():
         if out_source == "fallback_after_unwritable":
             st.warning(
                 f"default_output_dir ({cfg.settings.default_output_dir}) "
-                "isn't writable; output landed in a temp folder instead."
+                f"isn't writable ({out_detail}); output landed in a temp "
+                "folder instead."
             )
 
         # Analyze for OCR need (fast, first pages only)
@@ -615,7 +619,7 @@ def main():
                 _render_error(e)
                 st.stop()
 
-            out_dir, out_source = _resolve_output_dir(
+            out_dir, out_source, out_detail = _resolve_output_dir(
                 cfg,
                 override=None,
                 fallback_factory=lambda: batch_workdir / "output",
@@ -627,7 +631,7 @@ def main():
             batch_in = Path(batch_input_folder_str).expanduser()
             user_typed_out = batch_output_folder_str.strip()
             override = Path(user_typed_out).expanduser() if user_typed_out else None
-            out_dir, out_source = _resolve_output_dir(
+            out_dir, out_source, out_detail = _resolve_output_dir(
                 cfg,
                 override=override,
                 fallback_factory=lambda: batch_in / "processed",
@@ -639,7 +643,8 @@ def main():
         if out_source == "fallback_after_unwritable":
             st.warning(
                 f"default_output_dir ({cfg.settings.default_output_dir}) "
-                "isn't writable; outputs landed in the fallback location instead."
+                f"isn't writable ({out_detail}); outputs landed in the "
+                "fallback location instead."
             )
 
         progress_bar = st.progress(0.0, text="Starting batch…")

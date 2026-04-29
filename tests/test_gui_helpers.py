@@ -33,12 +33,13 @@ def test_resolve_output_dir_override_wins(tmp_path):
         fallback_calls["n"] += 1
         return tmp_path / "fallback"
 
-    path, source = _resolve_output_dir(
+    path, source, detail = _resolve_output_dir(
         cfg, override=override, fallback_factory=fallback
     )
 
     assert path == override
     assert source == "override"
+    assert detail is None
     assert override.is_dir()
     assert fallback_calls["n"] == 0
 
@@ -52,10 +53,13 @@ def test_resolve_output_dir_setting_used_when_writable(tmp_path):
         fallback_calls["n"] += 1
         return tmp_path / "fallback"
 
-    path, source = _resolve_output_dir(cfg, override=None, fallback_factory=fallback)
+    path, source, detail = _resolve_output_dir(
+        cfg, override=None, fallback_factory=fallback
+    )
 
     assert path == setting_dir
     assert source == "setting"
+    assert detail is None
     assert setting_dir.is_dir()
     assert fallback_calls["n"] == 0
 
@@ -70,10 +74,13 @@ def test_resolve_output_dir_fallback_when_setting_unset(tmp_path):
         fallback_dir.mkdir()
         return fallback_dir
 
-    path, source = _resolve_output_dir(cfg, override=None, fallback_factory=fallback)
+    path, source, detail = _resolve_output_dir(
+        cfg, override=None, fallback_factory=fallback
+    )
 
     assert path == fallback_dir
     assert source == "fallback"
+    assert detail is None
     assert fallback_calls["n"] == 1
 
 
@@ -96,10 +103,14 @@ def test_resolve_output_dir_fallback_after_unwritable(tmp_path, monkeypatch):
         fallback_dir.mkdir()
         return fallback_dir
 
-    path, source = _resolve_output_dir(cfg, override=None, fallback_factory=fallback)
+    path, source, detail = _resolve_output_dir(
+        cfg, override=None, fallback_factory=fallback
+    )
 
     assert path == fallback_dir
     assert source == "fallback_after_unwritable"
+    assert isinstance(detail, OSError)
+    assert "simulated read-only filesystem" in str(detail)
 
 
 def test_resolve_output_dir_factory_invoked_at_most_once(tmp_path):
