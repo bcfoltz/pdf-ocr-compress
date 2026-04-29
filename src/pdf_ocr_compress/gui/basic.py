@@ -5,7 +5,6 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 # Add src to path for imports
@@ -15,13 +14,11 @@ if __name__ == "__main__" and __package__ is None:
 import streamlit as st
 
 try:
-    from .core.compress import compress as run_compress
     from .core.detect import needs_ocr
-    from .core.ocr import run_ocr
+    from .core.pipeline import run_pipeline
 except ImportError:
-    from pdf_ocr_compress.core.compress import compress as run_compress
     from pdf_ocr_compress.core.detect import needs_ocr
-    from pdf_ocr_compress.core.ocr import run_ocr
+    from pdf_ocr_compress.core.pipeline import run_pipeline
 
 
 def setup_streamlit():
@@ -200,46 +197,27 @@ def main():
                     state="complete",
                 )
 
-        start = time.time()
+        # Map GUI mode buttons to run_pipeline modes.
+        pipeline_mode = {
+            "OCR only": "ocr",
+            "Compress only": "compress",
+        }.get(mode, "auto")
+
         try:
             with st.status(
                 "Processing… (large PDFs may take a while)", expanded=True
             ) as status:
-                if mode == "OCR only":
-                    st.write("Step 1/1: OCR")
-                    produced_path = run_ocr(
-                        input_pdf=in_path,
-                        output_pdf=out_base,
-                        lang=lang,
-                        preset=preset,
-                        pdfa=pdfa,
-                        jobs=jobs,
-                        force_ocr=force_ocr,
-                    )
-                elif mode == "Compress only":
-                    st.write("Step 1/1: Compress")
-                    produced_path = run_compress(in_path, out_base, preset=preset)
-                else:
-                    # Auto
-                    if force_ocr or need_ocr:
-                        # OCRmyPDF owns optimization here (--optimize N keyed
-                        # off preset). A post-OCR Ghostscript pass would strip
-                        # the /Font resources OCRmyPDF just wrote — see
-                        # Design rule #3 in CLAUDE.md.
-                        st.write("Step 1/1: OCR (no text detected or forced)")
-                        produced_path = run_ocr(
-                            input_pdf=in_path,
-                            output_pdf=out_base,
-                            lang=lang,
-                            preset=preset,
-                            pdfa=pdfa,
-                            jobs=jobs,
-                            force_ocr=True,
-                        )
-                    else:
-                        st.write("Step 1/1: Compress (text already present)")
-                        produced_path = run_compress(in_path, out_base, preset=preset)
-
+                st.write(f"Running pipeline (mode={pipeline_mode}, preset={preset})")
+                result = run_pipeline(
+                    in_path,
+                    out_base,
+                    mode=pipeline_mode,
+                    lang=lang,
+                    preset=preset,
+                    pdfa=pdfa,
+                    jobs=jobs,
+                    force_ocr=force_ocr,
+                )
                 status.update(label="Processing complete ✅", state="complete")
         except Exception as e:
             st.error(f"Processing failed: {e}")
@@ -249,15 +227,31 @@ def main():
                 pass
             st.stop()
 
+        produced_path = result.output_path
+
         # Report & download
         try:
-            in_size = in_path.stat().st_size if in_path.exists() else 0
-            out_size = produced_path.stat().st_size
-            elapsed = time.time() - start
-            st.success(
-                f"Done in {elapsed:.1f}s • Original: {_human(in_size)} → Output: {_human(out_size)} "
-                f"({(100.0 * (1 - out_size / max(in_size, 1))):.1f}% smaller)"
+            delta_label = f"{abs(result.pct_change):.1f}% " + (
+                "smaller" if result.pct_change < 0 else "larger"
             )
+            op_label = (
+                "OCR ran"
+                if result.ocr_ran
+                else f"OCR skipped ({result.ocr_skipped_reason})"
+            )
+            st.success(
+                f"Done in {result.processing_seconds:.1f}s • "
+                f"{_human(result.input_bytes)} → {_human(result.output_bytes)} "
+                f"({delta_label}) • {op_label} • preset: "
+                f"{result.preset_actually_used}"
+            )
+            if not result.pdfminer_text_extractable:
+                st.warning(
+                    "pdfminer could not extract text from the output — RAG ingestion "
+                    "may treat this PDF as image-only."
+                )
+            with st.expander("Full report"):
+                st.json(result.to_dict())
 
             # Suggested download name
             stem = (
