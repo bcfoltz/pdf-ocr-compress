@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from ..config import get_config
 from ..core.batch import run_batch
@@ -26,6 +26,7 @@ from .errors import (
     INVALID_OUTPUT_DIR,
     INVALID_PRESET,
     PROCESSING_FAILED,
+    APIError,
     APIException,
     install_exception_handlers,
 )
@@ -37,6 +38,30 @@ app = FastAPI(
     version="1.0.0",
 )
 install_exception_handlers(app)
+
+
+# Reusable OpenAPI `responses=` declarations so /docs renders the
+# APIError shape under each route's error status codes. Keys are HTTP
+# status codes; FastAPI fills the schema from the `model` field.
+_PROCESS_ERROR_RESPONSES: dict = {
+    400: {"model": APIError, "description": "Invalid input (mode/preset/file)"},
+    422: {"model": APIError, "description": "Request validation failed"},
+    500: {"model": APIError, "description": "Pipeline failure"},
+    503: {
+        "model": APIError,
+        "description": "Tesseract or Ghostscript missing on PATH",
+    },
+}
+_BATCH_START_ERROR_RESPONSES: dict = {
+    400: {
+        "model": APIError,
+        "description": "Invalid mode/preset/folder/output_dir",
+    },
+    422: {"model": APIError, "description": "Request validation failed"},
+}
+_NOT_FOUND_RESPONSES: dict = {
+    404: {"model": APIError, "description": "Resource not found or expired"},
+}
 
 
 # Temporary storage for processed files
@@ -83,6 +108,27 @@ class ProcessResponse(BaseModel):
     operation, just under the legacy field names.
     """
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Processing complete",
+                "file_id": "0e1d4a8b-3f96-4b3a-9c87-21be4d4d2c5f",
+                "mode": "auto",
+                "preset": "smallest",
+                "original_size": 39_678_222,
+                "output_size": 32_823_104,
+                "reduction_percent": 17.28,
+                "processing_time": 12.34,
+                "ocr_ran": False,
+                "ocr_skipped_reason": "input already has text layer",
+                "preset_actually_used": "smallest",
+                "pdfminer_text_extractable": True,
+                "pct_change": -17.28,
+            }
+        }
+    )
+
     status: str
     message: str
     file_id: str
@@ -109,6 +155,21 @@ class BatchRequest(BaseModel):
     zero-file report (matches CLI behavior).
     """
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "folder": "/data/scans/incoming",
+                "output_dir": "/data/scans/processed",
+                "mode": "auto",
+                "preset": "smallest",
+                "language": "eng",
+                "jobs": 4,
+                "pdfa": False,
+                "force_ocr": False,
+            }
+        }
+    )
+
     folder: str
     output_dir: str | None = None
     mode: str = "auto"
@@ -121,6 +182,16 @@ class BatchRequest(BaseModel):
 
 class BatchAcceptedResponse(BaseModel):
     """202 Accepted body returned by POST /api/batch."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "status": "queued",
+                "job_id": "0e1d4a8b-3f96-4b3a-9c87-21be4d4d2c5f",
+                "total_files": 47,
+            }
+        }
+    )
 
     status: str  # "queued"
     job_id: str
@@ -136,16 +207,19 @@ def cleanup_old_files():
     _storage().cleanup_expired_files()
 
 
-@app.get("/")
+@app.get("/", summary="API service info and endpoint index")
 async def root():
-    """Root endpoint with API information."""
+    """Root endpoint listing the available API surface."""
     return {
         "service": "PDF OCR + Compression API",
-        "version": "1.0.0",
+        "version": _api_version(),
         "endpoints": {
-            "POST /api/process": "Process a PDF file",
-            "GET /api/download/{file_id}": "Download processed file",
-            "GET /health": "Health check",
+            "POST /api/process": "Process one PDF",
+            "GET /api/download/{file_id}": "Download a processed PDF",
+            "POST /api/batch": "Queue a folder-batch job",
+            "GET /api/batch/{job_id}/status": "Poll a batch job",
+            "GET /health": "Service + tool detection",
+            "GET /docs": "Interactive OpenAPI docs",
         },
     }
 
@@ -228,22 +302,51 @@ async def health():
     }
 
 
-@app.post("/api/process", response_model=ProcessResponse)
+@app.post(
+    "/api/process",
+    response_model=ProcessResponse,
+    responses=_PROCESS_ERROR_RESPONSES,
+    summary="Process one PDF (OCR + compression)",
+)
 async def process_pdf(
     file: UploadFile = File(..., description="PDF file to process"),
-    mode: str = Form("auto", description="Processing mode: auto, ocr, compress"),
-    preset: str = Form(
-        "balanced", description="Quality preset: balanced, archival, smallest"
+    mode: str = Form(
+        "auto",
+        description=(
+            "Processing mode. `auto` runs OCR only when needed (text-layer "
+            "detection via pikepdf); `ocr` always runs OCR; `compress` skips "
+            "OCR. One of: auto | ocr | compress."
+        ),
     ),
-    language: str = Form("eng", description="OCR language codes (e.g., eng, eng+spa)"),
+    preset: str = Form(
+        "balanced",
+        description=(
+            "Compression preset. `smallest` is recommended for ScanSnap "
+            "scans of any size and is enforced as the oversize-fallback "
+            "target. One of: archival | balanced | smallest."
+        ),
+    ),
+    language: str = Form(
+        "eng",
+        description="Tesseract language codes joined by `+` (e.g. `eng`, `eng+spa`).",
+    ),
     pdfa: bool = Form(False, description="Produce PDF/A-2 compliant output"),
-    force_ocr: bool = Form(False, description="Force OCR even if text exists"),
-    jobs: int = Form(4, description="Number of parallel jobs for OCR"),
+    force_ocr: bool = Form(
+        False,
+        description="Force OCR even if a text layer is already present.",
+    ),
+    jobs: int = Form(
+        4, description="Number of parallel OCR workers (passed to OCRmyPDF)."
+    ),
 ):
-    """
-    Process a PDF file with OCR and/or compression.
+    """Process one PDF with OCR + compression and return a file_id.
 
-    Returns a file_id that can be used to download the processed file.
+    The pipeline enforces the size-invariant guard: if the requested
+    preset would grow the file, the response's `preset_actually_used`
+    will reflect the fallback that was applied (or the original preset
+    if a passthrough was needed). Use the returned `file_id` with
+    `GET /api/download/{file_id}` to retrieve the processed file
+    within 1 hour.
     """
     cleanup_old_files()
 
@@ -339,12 +442,22 @@ async def process_pdf(
         ) from e
 
 
-@app.get("/api/download/{file_id}")
+@app.get(
+    "/api/download/{file_id}",
+    responses={
+        200: {
+            "description": "The processed PDF file",
+            "content": {"application/pdf": {}},
+        },
+        **_NOT_FOUND_RESPONSES,
+    },
+    summary="Download a processed PDF by file_id",
+)
 async def download_file(file_id: str):
-    """
-    Download a processed PDF file.
+    """Download the processed PDF for a given file_id.
 
-    Files are kept for 1 hour after processing.
+    Returns 404 once the file has been cleaned up (1-hour TTL after
+    processing).
     """
     cleanup_old_files()
 
@@ -367,10 +480,17 @@ async def download_file(file_id: str):
     "/api/batch",
     response_model=BatchAcceptedResponse,
     status_code=202,
+    responses=_BATCH_START_ERROR_RESPONSES,
+    summary="Queue a folder of PDFs for batch processing",
 )
 async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
-    """Queue a folder-batch job. Returns a job_id immediately; processing
-    runs in the background. Poll GET /api/batch/{job_id}/status for state.
+    """Queue a folder-batch job and return its job_id immediately.
+
+    Folder must exist on the server's filesystem (no upload). The
+    request returns 202 with a `job_id`; processing runs in the
+    background. Poll `GET /api/batch/{job_id}/status` for state. The
+    failure ladder per file is: initial → immediate retry →
+    end-of-batch retry; one failing PDF will not abort the batch.
     """
     cleanup_old_jobs()
 
@@ -469,9 +589,19 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
     return BatchAcceptedResponse(status="queued", job_id=job_id, total_files=len(pdfs))
 
 
-@app.get("/api/batch/{job_id}/status")
+@app.get(
+    "/api/batch/{job_id}/status",
+    responses=_NOT_FOUND_RESPONSES,
+    summary="Poll a batch job's state",
+)
 async def batch_status(job_id: str):
-    """Poll a batch job's state. Returns 404 if unknown or expired."""
+    """Return the current state of a batch job.
+
+    Fields: `status` (queued | running | done | error), `started_at`,
+    `finished_at`, `progress_current`, `progress_total`, `error_msg`,
+    and `report` (the full BatchReport once status == done).
+    Returns 404 if the job is unknown or has been cleaned up (1-hour TTL).
+    """
     cleanup_old_jobs()
     row = _storage().get_batch_job(job_id)
     if row is None:
