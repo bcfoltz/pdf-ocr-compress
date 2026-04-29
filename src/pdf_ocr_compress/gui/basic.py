@@ -372,24 +372,41 @@ def main():
 
     # --- Main processing ---
     if run_btn:
-        workdir = Path(tempfile.mkdtemp(prefix="pdfgui_"))
-        out_base = (
-            workdir / "output.pdf"
-        )  # base name; functions will create unique outputs
+        # Resolve where the produced file should land. _resolve_output_dir
+        # honors cfg.settings.default_output_dir when set; otherwise a fresh
+        # tempdir is created.
+        out_dir, out_source = _resolve_output_dir(
+            cfg,
+            override=None,
+            fallback_factory=lambda: Path(tempfile.mkdtemp(prefix="pdfgui_")),
+        )
 
-        # Determine input path
+        # Determine input path. Uploads still need a writable workdir to
+        # land the input bytes; reuse a tempdir for that even when out_dir
+        # is the user's default_output_dir.
         if source_mode == "Upload in browser":
-            in_path = workdir / "input.pdf"
+            input_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_in_"))
+            in_stem = Path(uploaded.name).stem
+            in_path = input_workdir / "input.pdf"
             try:
                 _chunk_copy(uploaded, in_path)
             except Exception as e:
-                st.error(f"Failed to save uploaded file: {e}")
+                _render_error(e)
                 st.stop()
         else:
             in_path = Path(local_path_str).expanduser()
             if not (in_path.exists() and in_path.is_file()):
                 st.error("Local file not found. Please check the path.")
                 st.stop()
+            in_stem = in_path.stem
+
+        out_base = out_dir / f"{in_stem}.pdf"
+
+        if out_source == "fallback_after_unwritable":
+            st.warning(
+                f"default_output_dir ({cfg.settings.default_output_dir}) "
+                "isn't writable; output landed in a temp folder instead."
+            )
 
         # Analyze for OCR need (fast, first pages only)
         with st.status("Analyzing PDF…", expanded=False) as status:
@@ -429,11 +446,7 @@ def main():
                 )
                 status.update(label="Processing complete ✅", state="complete")
         except Exception as e:
-            st.error(f"Processing failed: {e}")
-            try:
-                shutil.rmtree(workdir, ignore_errors=True)
-            except Exception:
-                pass
+            _render_error(e)
             st.stop()
 
         produced_path = result.output_path
@@ -454,6 +467,8 @@ def main():
                 f"({delta_label}) • {op_label} • preset: "
                 f"{result.preset_actually_used}"
             )
+            if out_source in ("override", "setting"):
+                st.caption(f"📂 Saved to: `{result.output_path}`")
             if not result.pdfminer_text_extractable:
                 st.warning(
                     "pdfminer could not extract text from the output — RAG ingestion "
@@ -462,14 +477,8 @@ def main():
             with st.expander("Full report"):
                 st.json(result.to_dict())
 
-            # Suggested download name
-            stem = (
-                Path(local_path_str).stem
-                if source_mode.startswith("Use local")
-                else Path(uploaded.name).stem
-            )
             suffix = "_ocr" if mode == "OCR only" else "_processed"
-            dl_name = f"{stem}{suffix}.pdf"
+            dl_name = f"{in_stem}{suffix}.pdf"
 
             with open(produced_path, "rb") as f:
                 st.download_button(
