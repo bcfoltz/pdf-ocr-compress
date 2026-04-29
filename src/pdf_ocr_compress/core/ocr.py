@@ -201,7 +201,7 @@ def run_ocr(
                     f"Check if the language '{lang}' is installed",
                     "Verify with: tesseract --version",
                 ],
-            )
+            ) from e
         else:
             raise PDFProcessingError(
                 f"OCR processing failed: {e}",

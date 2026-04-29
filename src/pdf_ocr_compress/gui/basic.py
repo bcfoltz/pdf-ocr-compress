@@ -71,15 +71,15 @@ def main():
         st.write("""
         **✅ IDEAL for this tool:**
         - Scanned paper documents (receipts, forms, contracts)
-        - Photos of documents taken with phone/camera  
+        - Photos of documents taken with phone/camera
         - Image-based PDFs without searchable text
         - Old scanned files from legacy systems
-        
+
         **❌ NOT needed for:**
         - PDFs exported from Word, Excel, PowerPoint
         - Web pages saved as PDF
         - Digital documents with selectable text
-        
+
         **🔍 Not sure?** Use "Auto" mode - it detects if OCR is needed!
         """)
 

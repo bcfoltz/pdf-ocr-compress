@@ -2,10 +2,9 @@
 
 import time
 from pathlib import Path
-from typing import Union
 
 
-def unique_output_path(base_path: Union[str, Path], suffix: str = "_processed") -> Path:
+def unique_output_path(base_path: str | Path, suffix: str = "_processed") -> Path:
     """
     Generate a unique output path to prevent overwrites.
 
@@ -64,10 +63,10 @@ def safe_file_operation(func):
         try:
             return func(*args, **kwargs)
         except FileNotFoundError as e:
-            raise RuntimeError(f"File not found: {e}")
+            raise RuntimeError(f"File not found: {e}") from e
         except PermissionError as e:
-            raise RuntimeError(f"Permission denied: {e}")
+            raise RuntimeError(f"Permission denied: {e}") from e
         except OSError as e:
-            raise RuntimeError(f"File operation failed: {e}")
+            raise RuntimeError(f"File operation failed: {e}") from e
 
     return wrapper

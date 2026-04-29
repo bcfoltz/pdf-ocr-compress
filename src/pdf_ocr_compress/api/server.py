@@ -204,7 +204,9 @@ async def process_pdf(
         except Exception:
             pass
 
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Processing failed: {str(e)}"
+        ) from e
 
 
 @app.get("/api/download/{file_id}")

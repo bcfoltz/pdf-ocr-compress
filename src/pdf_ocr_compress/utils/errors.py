@@ -2,7 +2,6 @@
 
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 
 class PDFProcessingError(Exception):
@@ -145,7 +144,7 @@ class FileAccessError(PDFProcessingError):
         )
 
 
-def format_error_for_user(error: Exception) -> Tuple[str, list, Optional[str]]:
+def format_error_for_user(error: Exception) -> tuple[str, list, str | None]:
     """
     Format any exception for user-friendly display.
 

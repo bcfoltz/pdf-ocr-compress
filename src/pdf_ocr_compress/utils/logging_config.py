@@ -5,7 +5,6 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
 
 
 class JSONFormatter(logging.Formatter):
@@ -108,6 +107,7 @@ class PerformanceLogger:
                 }
             },
         )
+
 
 def setup_logging(
     log_level: str = "INFO", log_file: Path = None, structured_logging: bool = True

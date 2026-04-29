@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -47,7 +47,7 @@ class UISettings:
 class SystemSettings:
     """System and performance settings."""
 
-    temp_dir: Optional[str] = None
+    temp_dir: str | None = None
     max_memory_mb: int = 2048
     cleanup_temp_files: bool = True
     enable_caching: bool = True
@@ -79,7 +79,7 @@ class AppSettings:
 class ConfigManager:
     """Centralized configuration management."""
 
-    def __init__(self, config_dir: Optional[Path] = None):
+    def __init__(self, config_dir: Path | None = None):
         """Initialize configuration manager."""
         if config_dir is None:
             # Use platform-appropriate config directory
@@ -107,10 +107,10 @@ class ConfigManager:
         """Load settings from file or create defaults."""
         if self.config_file.exists():
             try:
-                with open(self.config_file, "r", encoding="utf-8") as f:
+                with open(self.config_file, encoding="utf-8") as f:
                     data = json.load(f)
                 return self._dict_to_settings(data)
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
+            except (json.JSONDecodeError, KeyError, TypeError):
                 # If config is corrupted, fall back to defaults
                 self._backup_corrupted_config()
 
@@ -152,7 +152,7 @@ class ConfigManager:
         self.save_settings(settings)
 
     # Utility methods
-    def _settings_to_dict(self, settings: AppSettings) -> Dict[str, Any]:
+    def _settings_to_dict(self, settings: AppSettings) -> dict[str, Any]:
         """Convert settings object to dictionary."""
         return {
             "ocr": asdict(settings.ocr),
@@ -161,7 +161,7 @@ class ConfigManager:
             "system": asdict(settings.system),
         }
 
-    def _dict_to_settings(self, data: Dict[str, Any]) -> AppSettings:
+    def _dict_to_settings(self, data: dict[str, Any]) -> AppSettings:
         """Convert dictionary to settings object."""
         return AppSettings(
             ocr=OCRSettings(**data.get("ocr", {})),
@@ -178,7 +178,7 @@ class ConfigManager:
 
 
 # Global configuration instance
-_config_manager: Optional[ConfigManager] = None
+_config_manager: ConfigManager | None = None
 
 
 def get_config() -> ConfigManager:
@@ -190,7 +190,7 @@ def get_config() -> ConfigManager:
     return _config_manager
 
 
-def save_config(config: Optional[ConfigManager] = None) -> None:
+def save_config(config: ConfigManager | None = None) -> None:
     """Save configuration to disk."""
     if config is None:
         config = get_config()

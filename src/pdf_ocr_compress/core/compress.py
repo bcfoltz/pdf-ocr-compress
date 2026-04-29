@@ -1,6 +1,5 @@
 # compress.py — ALWAYS writes a brand-new file; never in-place
 import shutil
-import tempfile
 import time
 from pathlib import Path
 from subprocess import CalledProcessError, run
@@ -88,7 +87,7 @@ def ghostscript_compress(
     try:
         run(args, check=True)
     except CalledProcessError as e:
-        raise RuntimeError(f"Ghostscript compression failed: {e}")
+        raise RuntimeError(f"Ghostscript compression failed: {e}") from e
     return output_pdf
 
 
