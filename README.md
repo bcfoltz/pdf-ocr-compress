@@ -125,7 +125,7 @@ python -m pdf_ocr_compress compress input.pdf output.pdf --preset balanced
 
 ## REST API Usage
 
-The Docker container includes a REST API for programmatic access, perfect for automation tools like n8n, Make, Zapier, or custom scripts.
+The Docker container includes a REST API for programmatic access, perfect for automation tools like Make, Zapier, or custom scripts.
 
 ### API Endpoints
 
@@ -191,22 +191,6 @@ download_response = requests.get(
 with open("processed.pdf", "wb") as f:
     f.write(download_response.content)
 ```
-
-### n8n Integration
-
-![n8n Workflow Example](images/n8n_simple.png)
-
-1. Add **HTTP Request** node
-2. Method: `POST`
-3. URL: `http://localhost:8502/api/process`
-4. Body Content Type: `Multipart-Form`
-5. Add fields:
-   - `file` (binary data from previous node)
-   - `mode` = `auto`
-   - `preset` = `balanced`
-6. Add second **HTTP Request** node to download using `file_id` from response
-
-See [N8N_BATCH_WORKFLOW.md](N8N_BATCH_WORKFLOW.md) for complete workflow examples including Google Drive and Dropbox integration.
 
 ### API Parameters
 
