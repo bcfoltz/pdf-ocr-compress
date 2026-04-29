@@ -55,6 +55,9 @@ dev-dependencies = [
     "black>=26.0.0",
     "ruff>=0.8.0",
     "pytest>=8.0.0",
+    # fastapi.testclient.TestClient depends on httpx; needed by the
+    # Phase 4 API tests. Stable since httpx 0.24, pin floor at 0.27.
+    "httpx>=0.27.0",
 ]
 
 [tool.black]

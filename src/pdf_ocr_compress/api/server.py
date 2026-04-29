@@ -7,19 +7,32 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..config import get_config
 from ..core.batch import BatchJobState, run_batch
 from ..core.pipeline import run_pipeline
+from .errors import (
+    BATCH_JOB_NOT_FOUND,
+    FILE_NOT_FOUND,
+    INPUT_NOT_PDF,
+    INVALID_FOLDER,
+    INVALID_MODE,
+    INVALID_OUTPUT_DIR,
+    INVALID_PRESET,
+    PROCESSING_FAILED,
+    APIException,
+    install_exception_handlers,
+)
 
 app = FastAPI(
     title="PDF OCR + Compression API",
     description="REST API for processing scanned PDFs with OCR and compression",
     version="1.0.0",
 )
+install_exception_handlers(app)
 
 
 # Temporary storage for processed files
@@ -164,13 +177,13 @@ async def process_pdf(
 
     # Validate inputs
     if mode not in ["auto", "ocr", "compress"]:
-        raise HTTPException(status_code=400, detail=f"Invalid mode: {mode}")
+        raise APIException(400, INVALID_MODE, f"Invalid mode: {mode}")
 
     if preset not in ["balanced", "archival", "smallest"]:
-        raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+        raise APIException(400, INVALID_PRESET, f"Invalid preset: {preset}")
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
+        raise APIException(400, INPUT_NOT_PDF, "File must be a PDF")
 
     # Create work directory
     file_id = str(uuid.uuid4())
@@ -230,15 +243,27 @@ async def process_pdf(
             pct_change=round(result.pct_change, 2),
         )
 
-    except Exception as e:
-        # Cleanup on error
+    except APIException:
+        # Already a wire-shape exception (validation etc.); just clean up.
         try:
             shutil.rmtree(workdir, ignore_errors=True)
         except Exception:
             pass
+        raise
+    except Exception as e:
+        # Cleanup on error. PDFProcessingError flows to the domain handler
+        # registered in install_exception_handlers; everything else is
+        # mapped to a generic PROCESSING_FAILED 500.
+        try:
+            shutil.rmtree(workdir, ignore_errors=True)
+        except Exception:
+            pass
+        from ..utils.errors import PDFProcessingError
 
-        raise HTTPException(
-            status_code=500, detail=f"Processing failed: {str(e)}"
+        if isinstance(e, PDFProcessingError):
+            raise
+        raise APIException(
+            500, PROCESSING_FAILED, f"Processing failed: {str(e)}"
         ) from e
 
 
@@ -252,12 +277,12 @@ async def download_file(file_id: str):
     cleanup_old_files()
 
     if file_id not in file_storage:
-        raise HTTPException(status_code=404, detail="File not found or expired")
+        raise APIException(404, FILE_NOT_FOUND, "File not found or expired")
 
     file_info = file_storage[file_id]
 
     if not file_info["path"].exists():
-        raise HTTPException(status_code=404, detail="File has been deleted")
+        raise APIException(404, FILE_NOT_FOUND, "File has been deleted")
 
     # Return original filename as-is
     download_name = file_info["original_name"]
@@ -279,13 +304,14 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
     cleanup_old_jobs()
 
     if req.mode not in ["auto", "ocr", "compress"]:
-        raise HTTPException(status_code=400, detail=f"Invalid mode: {req.mode}")
+        raise APIException(400, INVALID_MODE, f"Invalid mode: {req.mode}")
 
     folder = Path(req.folder)
     if not folder.exists() or not folder.is_dir():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Folder does not exist or is not a directory: {req.folder}",
+        raise APIException(
+            400,
+            INVALID_FOLDER,
+            f"Folder does not exist or is not a directory: {req.folder}",
         )
 
     output_dir = (
@@ -296,15 +322,16 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
         output_dir if output_dir.exists() else output_dir.parent
     )
     if not os.access(target_for_writability_check, os.W_OK):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Output dir (or its parent) is not writable: {output_dir}",
+        raise APIException(
+            400,
+            INVALID_OUTPUT_DIR,
+            f"Output dir (or its parent) is not writable: {output_dir}",
         )
 
     settings = get_config().settings
     preset = req.preset if req.preset is not None else settings.default_preset
     if preset not in ["archival", "balanced", "smallest"]:
-        raise HTTPException(status_code=400, detail=f"Invalid preset: {preset}")
+        raise APIException(400, INVALID_PRESET, f"Invalid preset: {preset}")
 
     language = req.language if req.language is not None else settings.default_language
     jobs = req.jobs if req.jobs is not None else settings.default_jobs
@@ -363,7 +390,7 @@ async def batch_status(job_id: str):
     cleanup_old_jobs()
     state = batch_jobs.get(job_id)
     if state is None:
-        raise HTTPException(status_code=404, detail="Batch job not found or expired")
+        raise APIException(404, BATCH_JOB_NOT_FOUND, "Batch job not found or expired")
     return state.to_dict()
 
 
