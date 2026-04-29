@@ -135,80 +135,94 @@ Top-level directories worth knowing:
 
 ## Where I left off
 
-**Phase 2 items 1–4 complete (2026-04-29).** All three Phase 0 bugs
-are fixed and the structured output report is plumbed through every
-surface. Items 5 & 6 are the only remaining Phase 2 work.
+**Phase 2 closed (2026-04-29).** All six items shipped; all three
+Phase 0 bugs are fixed; the structured output report flows through
+every surface; the OCR pipeline actually produces extractable text.
+Pick up at **Phase 3 (folder batch mode)** — see `ROADMAP.md`.
 
-**Phase 2 deliverables landed:**
+**Phase 2 deliverables (in order):**
 
 - **Item 1 (`be2cc72`)** — `core/detect.needs_ocr` rewritten on
   pikepdf. Opens with the tolerant parser; checks first 5 pages for
   any `/Font` resource. Fixes Sample B's pdfminer-strict false-
-  positive. 4 tests including a monkeypatch-based "doesn't depend on
-  pdfminer" proof.
+  positive.
 - **Item 2 (`d0793ea`)** — post-OCR Ghostscript pass dropped from CLI,
   GUI, and API. OCRmyPDF now owns optimization via `--optimize N`
   matching preset (archival=0, balanced=2, smallest=3, plus
-  `--jbig2-lossy` on smallest). 4 mocked tests.
-- **Item 3 (`fcfdc8f`)** — `oversize_policy` actually enforced. New
-  `core/oversize.py` with `enforce_oversize_policy(input, output,
-  policy, *, can_retry, retry_with_smallest)`. `compress()` and
-  `run_ocr()` both call it via a private `_enforce_oversize=True`
-  kwarg; the retry recurses with `_enforce_oversize=False` to break
-  the loop. 9 tests.
-- **Item 4 (`5822209`, `afc062c`, `ce28a5f`, `9a12709`)** — the
-  structured output report. Sub-itemized 4a/4b/4c/4d:
-  - **4a** core: `ProcessResult` dataclass + `run_pipeline` in
-    `core/pipeline.py`. `enforce_oversize_policy` got an `outcome`
-    OUT-parameter dict; `compress()` and `run_ocr()` got a `_result`
-    OUT-parameter dict that resolves `preset_used` (`"passthrough"` /
-    `"smallest"` / requested) so `preset_actually_used` is precise
-    even when the fallback fired. 15 new tests.
-  - **4b** CLI three subcommands now call `run_pipeline` exclusively;
-    output is `ProcessResult.one_line_summary()`.
-  - **4c** API `/api/process` switched; `ProcessResponse` gained 5
-    new fields (`ocr_ran`, `ocr_skipped_reason`, `preset_actually_used`,
-    `pdfminer_text_extractable`, `pct_change`) — additive, backward
-    compatible.
-  - **4d** GUI three-mode switch; success banner shows the structured
-    report, with a yellow warning if pdfminer can't extract text and a
-    JSON expander for the full report.
+  `--jbig2-lossy` on smallest).
+- **Item 3 (`fcfdc8f`)** — `oversize_policy` enforced via new
+  `core/oversize.py:enforce_oversize_policy`. `compress()` and
+  `run_ocr()` both call it; the fallback retry recurses with
+  `_enforce_oversize=False` to break the loop.
+- **Item 4 (`5822209`/`afc062c`/`ce28a5f`/`9a12709`)** — structured
+  output report. `ProcessResult` dataclass + `run_pipeline` in
+  `core/pipeline.py`. CLI/GUI/API all call `run_pipeline` exclusively
+  and surface the same report. API `ProcessResponse` gained 5 fields
+  (`ocr_ran`, `ocr_skipped_reason`, `preset_actually_used`,
+  `pdfminer_text_extractable`, `pct_change`); GUI shows them in a
+  success banner with a JSON expander.
+- **Item 5 (`a735361`)** — end-to-end pipeline-branch tests in
+  `tests/test_pipeline_branches.py`. Three branches × three fixtures
+  (`text_pdf` reused; new `image_only_pdf` from PIL; new
+  `incompressible_pdf` with a random-bytes image so Ghostscript
+  inflates under every preset). Gated on real Ghostscript/Tesseract
+  via `requires_*` skipifs. **Caught and fixed a real runtime bug:**
+  `core/ocr.py` was passing `--tesseract-timeout 0`, which in
+  OCRmyPDF ≥13 means "0-second budget" not "unlimited"; Tesseract
+  gave up immediately and emitted empty OCR layers on every real run.
+  The unit tests in `test_pipeline.py` couldn't see it because they
+  mock `_run_ocr`. Fix: omit the flag when
+  `settings.tesseract_timeout <= 0`, letting OCRmyPDF's own default
+  apply. Setting field semantics preserved (env-var override still
+  works for non-zero values).
+- **Item 6 (`65badf0`)** — text-fidelity round-trip in
+  `tests/test_text_fidelity.py`. `text_paragraph_pdf` and
+  `image_paragraph_pdf` fixtures (~45 tokens each, sharing a
+  `PARAGRAPH_TEXT` constant in `conftest.py`). Both branches assert
+  pdfminer extracts the same approximate token count ±10%, non-empty,
+  not all `\f`. Test-local tokenizer splits on whitespace AND
+  lowercase→uppercase transitions to handle pdfminer's habit of
+  concatenating last-of-line + first-of-next-line at OCR Form-XObject
+  boundaries (`dog` + `Pack` → `dogPack`); content is preserved, just
+  whitespace-stripped.
 
-**Tests:** 51 passing (was 21 at end of Phase 1). Black + ruff clean.
+**Tests:** 56 passing (was 21 at end of Phase 1). Black + ruff clean.
 
-**"Three surfaces, one pipeline" is now actually true** — CLI, GUI,
+**"Three surfaces, one pipeline" is now load-bearing** — CLI, GUI,
 and API all call exactly `core.pipeline.run_pipeline()` and surface
 the same `ProcessResult`. Routing logic lives in one place.
 
-**Pick up at Phase 2 items 5 & 6** — see `ROADMAP.md` Phase 2 section:
+**Phase 0 success criteria are now provable end-to-end:**
 
-- **Item 5 — pipeline-branch fixture tests:** PDFs covering the three
-  branches (already-has-text → compress-only path, image-only → OCR +
-  integrated optimization path, every-preset-grows → passthrough
-  path). Will exercise `run_pipeline` end-to-end. Real-Ghostscript /
-  real-Tesseract paths mark with `@requires_ghostscript` /
-  `@requires_tesseract` skipif (the existing pattern in
-  `tests/test_compress.py` is the model).
-- **Item 6 — text-fidelity round-trip test:** marked
-  `@requires_ghostscript @requires_tesseract`. Run a small text-
-  bearing PDF through `run_pipeline(mode="auto")`, assert pdfminer
-  extracts the same approximate token count ±10%, non-empty, not all
-  `\f`. Operationalizes "output is RAG-usable."
+- OCR branch produces pdfminer-extractable text (item 6's OCR round-
+  trip passes — proves Phase 0 bug #3 is fixed in practice, not just
+  in the args list).
+- Compress branch round-trips text 1:1 (item 6 compress test).
+- Oversize-fallback chain terminates at passthrough when every preset
+  inflates (item 5's passthrough test — enforces invariant #1).
 
-After items 5 & 6, Phase 2 closes and the next phase is Phase 3
-(folder-input batch mode) — see `ROADMAP.md`.
+**Pick up at Phase 3 — Batch.** Per ROADMAP.md Phase 3, the work is
+folder-input mode across CLI/GUI/API:
 
-**Honest gaps to remember on resume:**
+- CLI: `pdf-ocr batch <folder> [--preset X] [--output-dir Y] [--mode
+  auto|ocr|compress]`. Glob `*.pdf` in folder, sequential by default,
+  per-file `ProcessResult`, summary at the end.
+- GUI: multi-file uploader on `gui/basic.py` (still single page).
+- API: `/api/batch` endpoint.
+- **Out of scope reminder** (see "Out of scope" below): synchronous,
+  sequential, no async/threadpool. Single-counter retry ladder, not a
+  state machine. Don't reintroduce the deleted
+  `core/batch_processor.py` shape.
 
-- The Streamlit GUI was not click-through tested in a browser after
-  4d. Phase 5 explicitly covers browser testing; not regressing
-  Phase 2 deliverables.
-- The API endpoint has no `httpx`-based test yet. Phase 4 slates
-  `tests/api_smoke.sh` for this.
-- `text_pdf` fixture in `tests/conftest.py` is ~700 bytes — fine for
-  needs_ocr unit tests, but item 5/6 may want bigger fixtures
-  (multi-page text PDF, single-page image-only PDF). Build them in
-  the same conftest if needed.
+**Honest gaps still open from Phase 2 (deferred to later phases):**
+
+- Streamlit GUI not click-through tested in a browser after item 4d.
+  Phase 5 covers it.
+- API endpoint has no `httpx`-based test. Phase 4 slates
+  `tests/api_smoke.sh`.
+- CLI/GUI/API surface defaults still hardcoded (preset, jobs, lang).
+  `run_pipeline` reads from `config.get_config()`; surface defaults
+  don't yet. Phase 5.
 
 **Earlier on this branch:** Phase 1 (`80ea6ae`); Phase 0 benchmarks
 (`BENCHMARKS.md`, commit `1cc420e`); modernization Batches A–E
@@ -230,11 +244,8 @@ The three Phase 0 pipeline bugs are FIXED in Phase 2 items 1–3 (see
   defaults — `run_pipeline` does, but the surface-level Typer/
   Streamlit/Form defaults are still hardcoded. Phase 5 wires them in
   (settings UI, default output dir, oversize-policy surface).
-- **Phase 2 items 5 & 6 still to do.** Pipeline-branch fixture tests
-  and text-fidelity round-trip (`@requires_ghostscript` /
-  `@requires_tesseract`). See "Where I left off."
-- **Phase 3 batch + Phase 4 API hardening + Phase 6 docs polish** all
-  ahead. ROADMAP has the scope.
+- **Phase 3 batch + Phase 4 API hardening + Phase 5 GUI catchup +
+  Phase 6 docs polish** all ahead. ROADMAP has the scope.
 
 ## Out of scope
 
