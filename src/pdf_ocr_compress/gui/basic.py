@@ -166,12 +166,26 @@ def _render_defaults_panel(cfg) -> None:
             value=int(s.default_jobs),
             key="def_jobs",
         )
+        # Seed session_state from saved settings on first render so the
+        # text_input + Browse button can both target the same key without
+        # conflicting with a `value=` argument.
+        if "def_output_dir" not in st.session_state:
+            st.session_state["def_output_dir"] = (
+                str(s.default_output_dir) if s.default_output_dir else ""
+            )
         new_output_dir_str = st.text_input(
             "Default output directory (blank = unset)",
-            value=str(s.default_output_dir) if s.default_output_dir else "",
             placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
             key="def_output_dir",
         )
+        if st.button("📁 Browse…", key="def_output_dir_browse"):
+            try:
+                chosen = _pick_folder_dialog(initialdir=new_output_dir_str or None)
+                if chosen:
+                    st.session_state["def_output_dir"] = chosen
+                    st.rerun()
+            except RuntimeError as e:
+                st.warning(str(e))
         new_batch_concurrency = st.slider(
             "Batch concurrency",
             min_value=1,
@@ -269,6 +283,45 @@ def _timestamped_batch_subdir(base: Path) -> Path:
     sub = base / f"batch_{stamp}"
     sub.mkdir(parents=True, exist_ok=True)
     return sub
+
+
+def _pick_folder_dialog(initialdir: str | None = None) -> str | None:
+    """Pop a native OS folder picker and return the chosen path.
+
+    Returns the chosen absolute path as a string, or None if the user
+    cancelled. Raises RuntimeError if no GUI display is available
+    (Docker/headless), so callers can surface a friendly fallback.
+
+    Streamlit itself can't open a native folder picker (browser sandbox
+    blocks it), but this app is local-machine only — the Streamlit
+    server runs on the same box as the user's browser, so a server-side
+    Tk dialog opens in front of the user just fine.
+    """
+    import tkinter as tk
+    from tkinter import filedialog
+
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        raise RuntimeError(
+            "Folder picker requires a display (not available in headless "
+            "or Docker environments). Type the path manually instead."
+        ) from exc
+
+    try:
+        root.withdraw()
+        # Force the dialog above the browser window — on Windows the Tk
+        # dialog otherwise opens behind the active window roughly half
+        # the time.
+        root.attributes("-topmost", True)
+        chosen = filedialog.askdirectory(
+            initialdir=initialdir or str(Path.home()),
+            mustexist=True,
+        )
+    finally:
+        root.destroy()
+
+    return chosen or None
 
 
 def main():
@@ -571,6 +624,14 @@ def main():
             placeholder=r"e.g. G:\My Drive\Book Scans\Inbox",
             key="batch_in_folder",
         )
+        if st.button("📁 Browse…", key="batch_in_browse"):
+            try:
+                chosen = _pick_folder_dialog(initialdir=batch_input_folder_str or None)
+                if chosen:
+                    st.session_state["batch_in_folder"] = chosen
+                    st.rerun()
+            except RuntimeError as e:
+                st.warning(str(e))
         batch_output_folder_str = st.text_input(
             "Output folder (optional)",
             placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
@@ -582,6 +643,16 @@ def main():
             ),
             key="batch_out_folder",
         )
+        if st.button("📁 Browse…", key="batch_out_browse"):
+            try:
+                chosen = _pick_folder_dialog(
+                    initialdir=batch_output_folder_str or batch_input_folder_str or None
+                )
+                if chosen:
+                    st.session_state["batch_out_folder"] = chosen
+                    st.rerun()
+            except RuntimeError as e:
+                st.warning(str(e))
         try:
             folder_info = _collect_local_folder_inputs(batch_input_folder_str)
         except OSError as _e:
