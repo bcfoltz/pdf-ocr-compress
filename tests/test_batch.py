@@ -450,3 +450,57 @@ def test_run_batch_one_bad_apple_does_not_kill_batch(tmp_path, monkeypatch):
     assert by_name["a.pdf"].status == "ok"
     assert by_name["b.pdf"].status == "ok"
     assert by_name["doomed.pdf"].status == "failed"
+
+
+@requires_ghostscript
+def test_run_batch_real_binaries_all_succeed(text_pdf, tmp_path):
+    """Three valid PDFs through real Ghostscript: all `ok`, attempts=1."""
+    from pdf_ocr_compress.core.batch import run_batch
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    # Copy the same text_pdf three times under different names.
+    shutil.copy(text_pdf, in_dir / "alpha.pdf")
+    shutil.copy(text_pdf, in_dir / "bravo.pdf")
+    shutil.copy(text_pdf, in_dir / "charlie.pdf")
+
+    report = run_batch(in_dir, out_dir, mode="compress", preset="smallest")
+
+    assert report.total_files == 3
+    assert report.succeeded == 3
+    assert report.failed == 0
+    assert all(r.attempts == 1 for r in report.results)
+    assert all(r.process_result is not None for r in report.results)
+    # Every output exists on disk
+    for r in report.results:
+        assert r.output_path is not None
+        assert r.output_path.exists()
+    assert (out_dir / "batch_report.json").exists()
+
+
+@requires_ghostscript
+def test_run_batch_real_binaries_mixed_outcomes(text_pdf, corrupt_pdf, tmp_path):
+    """Two valid PDFs + one corrupt: 2 ok, 1 failed with attempts=3."""
+    from pdf_ocr_compress.core.batch import run_batch
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    shutil.copy(text_pdf, in_dir / "alpha.pdf")
+    shutil.copy(text_pdf, in_dir / "bravo.pdf")
+    shutil.copy(corrupt_pdf, in_dir / "doomed.pdf")
+
+    report = run_batch(in_dir, out_dir, mode="compress", preset="smallest")
+
+    assert report.total_files == 3
+    assert report.succeeded == 2
+    assert report.failed == 1
+    by_name = {r.input_path.name: r for r in report.results}
+    assert by_name["alpha.pdf"].status == "ok"
+    assert by_name["bravo.pdf"].status == "ok"
+    failed = by_name["doomed.pdf"]
+    assert failed.status == "failed"
+    assert failed.attempts == 3
+    assert failed.error_msg is not None
+    assert failed.output_path is None

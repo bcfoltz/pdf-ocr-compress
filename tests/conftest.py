@@ -168,3 +168,16 @@ def incompressible_pdf(tmp_path_factory):
     page.Contents = pdf.make_stream(b"q 72 0 0 72 0 0 cm /Im0 Do Q")
     pdf.save(path)
     return path
+
+
+@pytest.fixture(scope="session")
+def corrupt_pdf(tmp_path_factory):
+    """A file with .pdf extension but non-PDF content.
+
+    Both run_pipeline attempts will raise (pikepdf can't open it; OCRmyPDF
+    can't open it). Used by the batch failure-handling tests to verify
+    `attempts=3` and `status='failed'` after exhausting the retry ladder.
+    """
+    path = tmp_path_factory.mktemp("fixtures") / "corrupt.pdf"
+    path.write_bytes(b"this is not a PDF, it is just bytes\n")
+    return path
