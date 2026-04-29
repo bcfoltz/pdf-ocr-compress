@@ -1,10 +1,11 @@
 """FastAPI server for PDF OCR + Compression REST API."""
 
+import json
 import os
 import shutil
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
@@ -12,7 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..config import get_config
-from ..core.batch import BatchJobState, run_batch
+from ..core.batch import run_batch
 from ..core.pipeline import run_pipeline
 from .errors import (
     BATCH_JOB_NOT_FOUND,
@@ -60,23 +61,13 @@ def set_storage(storage: Storage) -> None:
     STORAGE = storage
 
 
-# Phase 3 — in-memory batch job state. Phase 4 task 3 swaps for SQLite.
-batch_jobs: dict = {}
-
-
 def cleanup_old_jobs():
-    """Remove batch jobs older than 1 hour. Mirrors the SQLite TTL on files."""
-    now = datetime.now()
-    expired = []
-    for job_id, state in batch_jobs.items():
-        try:
-            started = datetime.fromisoformat(state.started_at)
-        except (ValueError, AttributeError):
-            continue
-        if now - started > timedelta(hours=1):
-            expired.append(job_id)
-    for job_id in expired:
-        del batch_jobs[job_id]
+    """Remove batch_jobs rows older than the default TTL.
+
+    Phase 4 — SQLite-backed. Mirrors `cleanup_old_files` for the
+    `batch_jobs` table (same 1-hour expiry window).
+    """
+    _storage().cleanup_expired_batch_jobs()
 
 
 class ProcessResponse(BaseModel):
@@ -344,25 +335,33 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
 
     pdfs = sorted(p for p in folder.glob("*.pdf") if p.is_file())
     job_id = str(uuid.uuid4())
-    state = BatchJobState(
+    started_at = datetime.now().isoformat(timespec="milliseconds")
+    storage = _storage()
+    storage.insert_batch_job(
         job_id=job_id,
         status="queued",
-        started_at=datetime.now().isoformat(timespec="milliseconds"),
-        finished_at=None,
-        progress_current=0,
+        started_at=started_at,
         progress_total=len(pdfs),
-        report=None,
-        error_msg=None,
     )
-    batch_jobs[job_id] = state
+
+    # Capture the storage reference so the background closure doesn't
+    # re-resolve the module-level STORAGE (it could be swapped by tests
+    # before the task runs, but this request already committed to one DB).
+    job_storage = storage
 
     def _run() -> None:
-        state.status = "running"
         try:
 
             def cb(current: int, total: int, current_path: Path) -> None:
-                state.progress_current = current
-                state.progress_total = total
+                # Per-file progress write. SQLite WAL means this doesn't
+                # block /status reads; the writes are a couple hundred
+                # bytes each and run at file-level granularity, not
+                # per-page, so volume stays small.
+                job_storage.update_batch_progress(
+                    job_id,
+                    progress_current=current,
+                    progress_total=total,
+                )
 
             report = run_batch(
                 folder,
@@ -375,15 +374,21 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
                 force_ocr=req.force_ocr,
                 progress_callback=cb,
             )
-            state.report = report
-            state.status = "done"
+            job_storage.finish_batch_job(
+                job_id,
+                status="done",
+                finished_at=datetime.now().isoformat(timespec="milliseconds"),
+                report_json=json.dumps(report.to_dict()),
+            )
         except (
             Exception
         ) as e:  # noqa: BLE001 — surface orchestrator-level errors to the client
-            state.status = "error"
-            state.error_msg = str(e)
-        finally:
-            state.finished_at = datetime.now().isoformat(timespec="milliseconds")
+            job_storage.finish_batch_job(
+                job_id,
+                status="error",
+                finished_at=datetime.now().isoformat(timespec="milliseconds"),
+                error_msg=str(e),
+            )
 
     background_tasks.add_task(_run)
 
@@ -394,10 +399,10 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
 async def batch_status(job_id: str):
     """Poll a batch job's state. Returns 404 if unknown or expired."""
     cleanup_old_jobs()
-    state = batch_jobs.get(job_id)
-    if state is None:
+    row = _storage().get_batch_job(job_id)
+    if row is None:
         raise APIException(404, BATCH_JOB_NOT_FOUND, "Batch job not found or expired")
-    return state.to_dict()
+    return row
 
 
 def start_server(host: str = "0.0.0.0", port: int = 8502):

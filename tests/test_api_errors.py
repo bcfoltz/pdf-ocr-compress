@@ -195,3 +195,81 @@ def test_process_ghostscript_missing_maps_to_gs_tool_missing(
             )
     assert resp.status_code == 503
     _assert_error_shape(resp.json(), err.GHOSTSCRIPT_TOOL_MISSING)
+
+
+# --- Batch end-to-end through SQLite (Phase 4 task 3) -----------------------
+
+
+def test_batch_job_round_trip_persists_to_sqlite(
+    client: TestClient, isolated_api_storage, tmp_path: Path
+) -> None:
+    """POST /api/batch persists the job; GET /status reads it from SQLite.
+
+    Uses a mocked run_batch so we don't need Tesseract/Ghostscript on the
+    test machine. The point of this test is the wiring: insert_batch_job
+    on POST, finish_batch_job on completion, get_batch_job on GET.
+    """
+    from pdf_ocr_compress.core.batch import BatchReport
+
+    folder = tmp_path / "in"
+    folder.mkdir()
+    # POST /api/batch globs *.pdf even though run_batch is mocked, so put
+    # one file there to exercise the total_files counter.
+    (folder / "a.pdf").write_bytes(b"%PDF-1.4\n%mock\n")
+
+    fake_report = BatchReport(
+        input_dir=folder,
+        output_dir=folder / "processed",
+        total_files=1,
+        succeeded=1,
+        failed=0,
+        started_at="2026-04-29T00:00:00.000",
+        finished_at="2026-04-29T00:00:01.000",
+        total_seconds=1.0,
+        total_input_bytes=10,
+        total_output_bytes=10,
+        results=[],
+    )
+    with patch("pdf_ocr_compress.api.server.run_batch", return_value=fake_report):
+        resp = client.post(
+            "/api/batch",
+            json={"folder": str(folder), "mode": "auto", "preset": "smallest"},
+        )
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        assert resp.json()["total_files"] == 1
+
+    # FastAPI runs BackgroundTasks after the response is sent; with
+    # TestClient that happens synchronously before the .post() returns.
+    # By here, the job should already be in the 'done' state.
+    status_resp = client.get(f"/api/batch/{job_id}/status")
+    assert status_resp.status_code == 200
+    body = status_resp.json()
+    assert body["status"] == "done"
+    assert body["report"] is not None
+    assert body["report"]["succeeded"] == 1
+
+
+def test_batch_job_error_persists_to_sqlite(
+    client: TestClient, isolated_api_storage, tmp_path: Path
+) -> None:
+    """run_batch raising ends the job in status=error with the message."""
+    folder = tmp_path / "in"
+    folder.mkdir()
+    (folder / "a.pdf").write_bytes(b"%PDF-1.4\n%mock\n")
+
+    with patch(
+        "pdf_ocr_compress.api.server.run_batch",
+        side_effect=RuntimeError("kapow"),
+    ):
+        resp = client.post(
+            "/api/batch",
+            json={"folder": str(folder), "mode": "auto", "preset": "smallest"},
+        )
+        job_id = resp.json()["job_id"]
+
+    status_resp = client.get(f"/api/batch/{job_id}/status")
+    body = status_resp.json()
+    assert body["status"] == "error"
+    assert body["error_msg"] == "kapow"
+    assert body["report"] is None
