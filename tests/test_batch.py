@@ -204,3 +204,127 @@ def test_batch_job_state_to_dict_running(tmp_path):
     assert d["finished_at"] is None
     assert d["progress_current"] == 14
     assert d["report"] is None
+
+
+def _fake_pipeline_factory(tmp_path: Path):
+    """Build a stand-in for run_pipeline that writes a tiny output and returns
+    a synthetic ProcessResult. Captures every call for assertions.
+    """
+    calls: list[Path] = []
+
+    def fake(input_pdf, output_pdf, **kwargs):
+        calls.append(Path(input_pdf))
+        out = output_pdf  # simulate compress/ocr writing exactly to base path
+        Path(out).write_bytes(b"%PDF-1.4 fake\n")
+        return ProcessResult(
+            output_path=Path(out),
+            input_bytes=Path(input_pdf).stat().st_size,
+            output_bytes=Path(out).stat().st_size,
+            pct_change=-50.0,
+            ocr_ran=False,
+            ocr_skipped_reason="input_has_text_layer",
+            processing_seconds=0.01,
+            preset_actually_used="smallest",
+            pdfminer_text_extractable=True,
+        )
+
+    return fake, calls
+
+
+def _make_pdf(path: Path, payload: bytes = b"%PDF-1.4\n") -> Path:
+    path.write_bytes(payload)
+    return path
+
+
+def test_run_batch_empty_folder_writes_zero_file_report(tmp_path):
+    from pdf_ocr_compress.core.batch import run_batch
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+
+    report = run_batch(in_dir, out_dir)
+
+    assert report.total_files == 0
+    assert report.succeeded == 0
+    assert report.failed == 0
+    assert report.results == []
+    assert (out_dir / "batch_report.json").exists()
+
+
+def test_run_batch_creates_output_dir(tmp_path):
+    from pdf_ocr_compress.core.batch import run_batch
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out" / "nested"
+    in_dir.mkdir()
+
+    run_batch(in_dir, out_dir)
+
+    assert out_dir.exists()
+    assert out_dir.is_dir()
+
+
+def test_run_batch_happy_path_three_files(tmp_path, monkeypatch):
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    a = _make_pdf(in_dir / "a.pdf")
+    b = _make_pdf(in_dir / "b.pdf")
+    c = _make_pdf(in_dir / "c.pdf")
+
+    fake, calls = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert report.total_files == 3
+    assert report.succeeded == 3
+    assert report.failed == 0
+    assert {r.input_path for r in report.results} == {a, b, c}
+    assert all(r.status == "ok" for r in report.results)
+    assert all(r.attempts == 1 for r in report.results)
+    assert len(calls) == 3
+
+
+def test_run_batch_progress_callback_invoked_per_file(tmp_path, monkeypatch):
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    _make_pdf(in_dir / "a.pdf")
+    _make_pdf(in_dir / "b.pdf")
+
+    fake, _ = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    seen: list[tuple[int, int, str]] = []
+
+    def cb(current: int, total: int, current_path: Path) -> None:
+        seen.append((current, total, current_path.name))
+
+    batch_mod.run_batch(in_dir, out_dir, progress_callback=cb)
+
+    assert seen == [(1, 2, "a.pdf"), (2, 2, "b.pdf")]
+
+
+def test_run_batch_results_sorted_by_input_path(tmp_path, monkeypatch):
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    # Create in non-alphabetical order to make sure sort is path-based.
+    _make_pdf(in_dir / "c.pdf")
+    _make_pdf(in_dir / "a.pdf")
+    _make_pdf(in_dir / "b.pdf")
+
+    fake, _ = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert [r.input_path.name for r in report.results] == ["a.pdf", "b.pdf", "c.pdf"]
