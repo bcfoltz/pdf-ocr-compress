@@ -144,7 +144,7 @@ def _render_defaults_panel(cfg) -> None:
     st.rerun() refreshes the page so per-run controls re-init.
     """
     s = cfg.settings
-    with st.sidebar.expander("⚙️  Defaults (saved across sessions)", expanded=False):
+    with st.sidebar.expander("⚙️ Defaults (saved across sessions)", expanded=False):
         new_preset = st.selectbox(
             "Default preset",
             _PRESET_CHOICES,
@@ -203,7 +203,7 @@ def _render_defaults_panel(cfg) -> None:
 
         candidate = AppSettings(
             default_preset=new_preset,
-            default_language=new_lang,
+            default_language=new_lang.strip(),
             default_jobs=int(new_jobs),
             default_output_dir=(
                 Path(new_output_dir_str).expanduser()
