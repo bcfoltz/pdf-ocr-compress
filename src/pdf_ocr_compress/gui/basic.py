@@ -61,6 +61,54 @@ def _ensure_writable(path: Path) -> Path:
     return path
 
 
+def _collect_local_folder_inputs(folder_str: str) -> dict:
+    """Pre-flight summary for the batch local-folder input field.
+
+    Returns a dict with:
+      - valid (bool):      True when the folder exists and contains >=1 PDF
+      - msg (str):         the line to render via st.info / st.warning
+      - pdf_count (int):   PDFs found (non-recursive; *.pdf in folder)
+      - total_bytes (int): sum of stat sizes
+    Empty string returns valid=False with empty msg (used to disable the
+    button without displaying anything noisy on first render).
+    """
+    if not folder_str.strip():
+        return {"valid": False, "msg": "", "pdf_count": 0, "total_bytes": 0}
+
+    folder = Path(folder_str).expanduser()
+    if not folder.exists():
+        return {
+            "valid": False,
+            "msg": f"Path not found: {folder}",
+            "pdf_count": 0,
+            "total_bytes": 0,
+        }
+    if not folder.is_dir():
+        return {
+            "valid": False,
+            "msg": f"Not a folder (this is a file): {folder}",
+            "pdf_count": 0,
+            "total_bytes": 0,
+        }
+
+    pdfs = sorted(p for p in folder.glob("*.pdf") if p.is_file())
+    if not pdfs:
+        return {
+            "valid": False,
+            "msg": f"No PDFs found in {folder} (non-recursive)",
+            "pdf_count": 0,
+            "total_bytes": 0,
+        }
+
+    total_bytes = sum(p.stat().st_size for p in pdfs)
+    return {
+        "valid": True,
+        "msg": f"Found {len(pdfs)} PDFs ({_human(total_bytes)}) in {folder}",
+        "pdf_count": len(pdfs),
+        "total_bytes": total_bytes,
+    }
+
+
 def _resolve_output_dir(
     cfg, override: Path | None, fallback_factory
 ) -> tuple[Path, str]:
