@@ -36,17 +36,22 @@ class SystemToolError(PDFProcessingError):
         """Get installation suggestions for specific tools."""
         suggestions = {
             "tesseract": [
-                "Install Tesseract OCR using the provided installation scripts",
-                "On Windows: Run scripts/install_windows.ps1 as Administrator",
-                "On macOS: Run bash scripts/install_macos.sh",
-                "On Linux: Run bash scripts/install_linux.sh",
-                "Verify installation with: tesseract --version",
+                "Install Tesseract OCR and ensure it's on your PATH:",
+                "  Windows: winget install UB-Mannheim.TesseractOCR",
+                "  macOS: brew install tesseract tesseract-lang",
+                "  Linux (Debian/Ubuntu): sudo apt install tesseract-ocr",
+                "  Linux (Fedora/RHEL): sudo dnf install tesseract",
+                "  Linux (Arch): sudo pacman -S tesseract tesseract-data-eng",
+                "Verify with: tesseract --version",
             ],
             "ghostscript": [
-                "Install Ghostscript using the provided installation scripts",
-                "Ensure Ghostscript is added to your system PATH",
-                "On Windows: Verify with gswin64c --version",
-                "On macOS/Linux: Verify with gs --version",
+                "Install Ghostscript and ensure it's on your PATH:",
+                "  Windows: winget install AGPL.Ghostscript",
+                "  macOS: brew install ghostscript",
+                "  Linux (Debian/Ubuntu): sudo apt install ghostscript",
+                "  Linux (Fedora/RHEL): sudo dnf install ghostscript",
+                "  Linux (Arch): sudo pacman -S ghostscript",
+                "Verify with: gswin64c --version (Windows) or gs --version (other)",
             ],
         }
         return suggestions.get(

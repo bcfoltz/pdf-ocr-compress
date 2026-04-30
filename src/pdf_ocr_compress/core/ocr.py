@@ -244,8 +244,8 @@ def run_ocr(
                 "tesseract",
                 str(e),
                 [
-                    "Install Tesseract OCR using the provided installation scripts",
-                    "Ensure Tesseract is in your system PATH",
+                    "Install Tesseract OCR and ensure it's on your PATH (winget on "
+                    "Windows; brew on macOS; apt/dnf/pacman on Linux — see README).",
                     f"Check if the language '{lang}' is installed",
                     "Verify with: tesseract --version",
                 ],

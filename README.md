@@ -130,11 +130,28 @@ macOS:
 brew install tesseract tesseract-lang ghostscript
 ```
 
-Linux (Debian/Ubuntu):
+On Apple Silicon, brew installs to `/opt/homebrew/bin`. Restart your
+shell after install if it doesn't pick up the new PATH automatically.
+
+Linux:
 
 ```bash
-sudo apt install tesseract-ocr ghostscript
+# Debian / Ubuntu
+sudo apt install tesseract-ocr ghostscript python3-tk
+
+# Fedora / RHEL
+sudo dnf install tesseract ghostscript python3-tkinter
+
+# Arch
+sudo pacman -S tesseract tesseract-data-eng ghostscript tk
 ```
+
+`python3-tk` (or the distro equivalent) is needed for the GUI's
+"Browse" folder picker. Without it the picker raises a friendly error
+and you'll need to type folder paths by hand. Headless / Docker
+environments work fine without it. For other Tesseract languages,
+add packages like `tesseract-ocr-spa` (Debian) / `tesseract-langpack-spa`
+(Fedora) / `tesseract-data-spa` (Arch).
 
 ## Quality presets
 
