@@ -582,11 +582,16 @@ def main():
                     mime="application/pdf",
                 )
 
-            # Equivalent CLI (for reproducibility)
+            # Equivalent CLI (for reproducibility).
+            # Use only the filename, not the full temp path — the temp dir
+            # is an upload artifact that doesn't survive beyond this session
+            # and contains local machine paths that would leak in screenshots.
+            in_name = in_path.name
+            out_name = out_base.name
             st.caption("Equivalent CLI you could run in a terminal:")
             if mode == "OCR only":
                 st.code(
-                    f'pdf-ocr ocr "{in_path}" "{out_base}" --lang {lang} --preset {preset}'
+                    f'pdf-ocr ocr "{in_name}" "{out_name}" --lang {lang} --preset {preset}'
                     + (" --pdfa" if pdfa else "")
                     + (f" --jobs {jobs}" if jobs != 1 else "")
                     + (" --force-ocr" if force_ocr else ""),
@@ -594,12 +599,12 @@ def main():
                 )
             elif mode == "Compress only":
                 st.code(
-                    f'pdf-ocr compress "{in_path}" "{out_base}" --preset {preset}',
+                    f'pdf-ocr compress "{in_name}" "{out_name}" --preset {preset}',
                     language="bash",
                 )
             else:
                 st.code(
-                    f'pdf-ocr process "{in_path}" "{out_base}" --lang {lang} --preset {preset}'
+                    f'pdf-ocr process "{in_name}" "{out_name}" --lang {lang} --preset {preset}'
                     + (" --pdfa" if pdfa else "")
                     + (f" --jobs {jobs}" if jobs != 1 else "")
                     + (" --force-ocr" if force_ocr else ""),
