@@ -8,8 +8,7 @@ The server binds to port 8502 by default (Docker, `start_services.sh`,
 or `uv run python -m uvicorn pdf_ocr_compress.api.server:app --port 8502`).
 There is no authentication — single-machine assumption. Files
 processed via `/api/process` and batch jobs queued via `/api/batch`
-are retained for 1 hour and survive uvicorn restarts (SQLite-backed,
-Phase 4).
+are retained for 1 hour and survive uvicorn restarts.
 
 **Do not expose port 8502 to untrusted networks.** The server binds
 `0.0.0.0` by default (Docker/uvicorn defaults), accepts arbitrary
@@ -351,12 +350,12 @@ Returned by `POST /api/process`. Every field is always present.
 | `ocr_ran` | bool | Whether OCR was executed. |
 | `ocr_skipped_reason` | string \| null | Reason OCR was skipped. `null` when OCR ran. Short snake_case tokens; current values are `"input_has_text_layer"` (auto-routing detected an existing text layer) and `"compress_only_mode"` (caller passed `mode=compress`). |
 | `preset_actually_used` | string | The preset that produced the output file. May differ from `preset` if the requested preset would have grown the file (oversize fallback ladder: requested → `smallest` → passthrough). |
-| `pdfminer_text_extractable` | bool | Post-hoc fidelity check: pdfminer was able to extract text from the output. A `false` value when `ocr_ran` is `true` indicates a serious problem (Phase 0 bug #3 territory). |
+| `pdfminer_text_extractable` | bool | Post-hoc fidelity check: pdfminer was able to extract text from the output. A `false` value when `ocr_ran` is `true` indicates a serious problem (OCR ran but produced no extractable text layer). |
 | `pct_change` | float | Negative when output shrunk; positive when output grew. |
 
 The `original_size` / `output_size` / `reduction_percent` /
-`processing_time` block predates Phase 2 and is kept for back-compat
-with consumers that branch on the older field names. The newer
+`processing_time` block is kept for back-compat with consumers that
+branch on the older field names. The newer
 fields (`ocr_ran`, `ocr_skipped_reason`, `preset_actually_used`,
 `pdfminer_text_extractable`, `pct_change`) describe the same
 operation in more detail.
@@ -480,8 +479,7 @@ archival-format file whose textual content is still image-only.
 
 - **Retention.** Files from `/api/process` are retained 1 hour after
   the response is returned. Batch jobs are retained 1 hour after
-  completion. Both survive uvicorn restarts (Phase 4 SQLite
-  persistence).
+  completion. Both survive uvicorn restarts (SQLite-backed).
 - **Server-side folders.** `/api/batch` requires the API process to
   have read access to `folder`. There is no upload-batch mode.
 - **Single machine.** No auth, no rate limiting, no per-user

@@ -1,10 +1,10 @@
-"""Folder-batch orchestrator. Phase 3 — see docs/superpowers/specs/.
+"""Folder-batch orchestrator.
 
 Loops core.pipeline.run_pipeline() over *.pdf files in a folder, applies a
 retry-once / second-pass-at-end-of-batch failure ladder, and emits a
 BatchReport (also written to <output_dir>/batch_report.json). The pipeline
-itself is unchanged: every Phase 0/1/2 invariant (size guard, oversize
-fallback, OCR routing, structured ProcessResult) keeps applying per-file.
+itself is unchanged: every pipeline invariant (size guard, oversize fallback,
+OCR routing, structured ProcessResult) keeps applying per-file.
 """
 
 import json
@@ -115,7 +115,7 @@ class BatchReport:
 
 @dataclass
 class BatchJobState:
-    """API job record. Phase 3 lives in an in-memory dict; Phase 4 = SQLite."""
+    """API job record. Serialised by Storage into the SQLite batch_jobs table."""
 
     job_id: str
     status: BatchStatus

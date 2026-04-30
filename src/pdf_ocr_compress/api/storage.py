@@ -1,4 +1,4 @@
-"""SQLite-backed persistence for the API server (Phase 4 item 1).
+"""SQLite-backed persistence for the API server.
 
 Replaces the in-memory `file_storage` and `batch_jobs` dicts in
 `server.py` so processed-file IDs and batch-job state survive a uvicorn
@@ -35,9 +35,9 @@ CREATE TABLE IF NOT EXISTS files (
 )
 """
 
-# Phase 4 item 1 part B — `report_json` carries the serialized
-# `BatchReport` (matches `report = BatchReport.to_dict()` shape) so a
-# completed job is fully reconstructable from the row.
+# `report_json` carries the serialized `BatchReport` (matches
+# `report = BatchReport.to_dict()` shape) so a completed job is fully
+# reconstructable from the row.
 _BATCH_JOBS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS batch_jobs (
     job_id           TEXT PRIMARY KEY,
@@ -72,9 +72,9 @@ class Storage:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute(_FILES_SCHEMA)
         self.conn.execute(_BATCH_JOBS_SCHEMA)
-        # Phase 4 item 1 part B — any job that was running when the
-        # server died is unrecoverable (its background thread is gone).
-        # Mark stale once at startup so /status reflects reality.
+        # Any job that was running when the server died is unrecoverable
+        # (its background thread is gone). Mark stale once at startup so
+        # /status reflects reality.
         self._mark_stale_running_jobs()
 
     # --- files table --------------------------------------------------------

@@ -12,7 +12,7 @@ work, gated on the prior one. Pick up at the next non-completed phase.
 - [x] **Phase 3 — Batch** (2026-04-29)
 - [x] **Phase 4 — API hardening** (2026-04-29)
 - [x] **Phase 5 — GUI catchup** (2026-04-29)
-- [ ] **Phase 6 — Documentation polish**
+- [x] **Phase 6 — Documentation polish** (2026-04-29)
 
 ## Locked-in design invariants from Phase 0
 

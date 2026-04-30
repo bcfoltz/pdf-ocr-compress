@@ -1,4 +1,4 @@
-"""API-level error model and exception handlers (Phase 4 item 2).
+"""API-level error model and exception handlers.
 
 This module owns the *wire shape* every 4xx/5xx response uses. Internal
 domain exceptions live in `utils.errors`; this layer maps them to a
@@ -42,8 +42,9 @@ GHOSTSCRIPT_TOOL_MISSING: Final[str] = "GHOSTSCRIPT_TOOL_MISSING"
 PROCESSING_FAILED: Final[str] = "PROCESSING_FAILED"
 OUTPUT_GREW_NO_FALLBACK: Final[str] = "OUTPUT_GREW_NO_FALLBACK"
 VALIDATION_ERROR: Final[str] = "VALIDATION_ERROR"
-# Reserved per ROADMAP — no enforcement path in Phase 4. Listed so consumers
-# can wire branches against it now without breaking when enforcement lands.
+# Reserved — no enforcement path yet. The /api/process upload reads the full
+# file into memory before writing to disk; a future max_upload_bytes setting
+# would trigger this code. See CLAUDE.md "Open debt" for status.
 FILE_TOO_LARGE: Final[str] = "FILE_TOO_LARGE"
 
 

@@ -117,7 +117,7 @@ def _collect_local_folder_inputs(folder_str: str) -> dict:
 
 
 def _render_error(exc: Exception) -> None:
-    """Render any exception via Phase 4's user-friendly formatter.
+    """Render any exception via the user-friendly formatter.
 
     Replaces ad-hoc `st.error(f"...{e}")` strings in the GUI. The
     formatter (utils/errors.format_error_for_user) handles

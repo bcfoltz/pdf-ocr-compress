@@ -91,8 +91,8 @@ def set_storage(storage: Storage) -> None:
 def cleanup_old_jobs():
     """Remove batch_jobs rows older than the default TTL.
 
-    Phase 4 — SQLite-backed. Mirrors `cleanup_old_files` for the
-    `batch_jobs` table (same 1-hour expiry window).
+    SQLite-backed. Mirrors `cleanup_old_files` for the `batch_jobs`
+    table (same 1-hour expiry window).
     """
     _storage().cleanup_expired_batch_jobs()
 
@@ -139,7 +139,7 @@ class ProcessResponse(BaseModel):
     reduction_percent: float  # positive = output is smaller
     processing_time: float
 
-    # Phase 2 item 4 — structured operation report
+    # Structured operation report (fields below added for detailed per-run data)
     ocr_ran: bool
     ocr_skipped_reason: str | None
     preset_actually_used: str  # may differ from `preset` if oversize fallback fired
@@ -201,8 +201,8 @@ class BatchAcceptedResponse(BaseModel):
 def cleanup_old_files():
     """Remove rows past expires_at and their on-disk artifacts.
 
-    Phase 4 — backed by SQLite. The 1-hour TTL is enforced via the
-    `expires_at` column written by `Storage.insert_file`.
+    SQLite-backed. The 1-hour TTL is enforced via the `expires_at`
+    column written by `Storage.insert_file`.
     """
     _storage().cleanup_expired_files()
 
@@ -283,9 +283,9 @@ def _api_version() -> str:
 async def health():
     """Health check endpoint.
 
-    Phase 4 — reports environment state so a monitoring system can
-    distinguish "API up" from "API up but Tesseract missing". Fields:
-    `version` (pdf-ocr-compress version), `ghostscript_binary` and
+    Reports environment state so a monitoring system can distinguish
+    "API up" from "API up but Tesseract missing". Fields: `version`
+    (pdf-ocr-compress version), `ghostscript_binary` and
     `tesseract_binary` (absolute paths or null), `tesseract_languages`
     (installed language codes), `queue_depth` (count of queued/running
     batch jobs).
@@ -387,7 +387,7 @@ async def process_pdf(
             force_ocr=force_ocr,
         )
 
-        # Persist to SQLite (Phase 4 — survives uvicorn restart).
+        # Persist to SQLite — survives uvicorn restart.
         _storage().insert_file(
             file_id=file_id,
             original_name=file.filename,
