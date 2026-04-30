@@ -23,6 +23,20 @@ COPY .streamlit/ ./.streamlit/
 COPY start_services.sh .
 RUN chmod +x start_services.sh
 
+# Run as a non-root user (defense-in-depth). UID/GID 1000 matches the
+# typical first-user UID on Linux distros so bind-mounted directories
+# from the host (e.g. ./pdfs:/pdfs in docker-compose.yml) usually
+# "just work". If your host UID isn't 1000, either:
+#   - rebuild with `docker build --build-arg UID=$(id -u) ...`, or
+#   - chown the bind-mounted directory on the host: `chown -R 1000:1000 ./pdfs`
+# Docker Desktop on macOS / Windows handles UID mapping transparently.
+ARG UID=1000
+ARG GID=1000
+RUN groupadd --system --gid ${GID} app \
+    && useradd --system --uid ${UID} --gid ${GID} --create-home --shell /sbin/nologin app \
+    && chown -R app:app /app
+USER app
+
 # Expose Streamlit and API ports
 EXPOSE 8501 8502
 
