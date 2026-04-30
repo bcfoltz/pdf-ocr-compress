@@ -3,8 +3,12 @@ services:
     build: .
     container_name: pdf-ocr-compress
     ports:
-      - "8501:8501"
-      - "8502:8502"
+      # Bound to 127.0.0.1 only — single-machine assumption (no auth, no
+      # CORS, batch endpoint accepts arbitrary server-side filesystem
+      # paths). Drop the `127.0.0.1:` prefix only if you've put auth or
+      # network ACLs in front. See docs/API.md.
+      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8502:8502"
     volumes:
       # Mount a local directory for processing files
       # Files placed in ./pdfs will be accessible in the container
@@ -15,7 +19,7 @@ services:
       - STREAMLIT_SERVER_MAX_MESSAGE_SIZE=4096
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8502/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

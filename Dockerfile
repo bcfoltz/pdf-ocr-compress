@@ -33,9 +33,14 @@ ENV STREAMLIT_SERVER_PORT=8501 \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
     STREAMLIT_BROWSER_SERVER_ADDRESS=localhost
 
-# Health check
+# Health check — probes the API (the load-bearing surface). The Streamlit
+# /_stcore/health endpoint reports green even when uvicorn has died,
+# which is the wrong signal for an API-first backend service.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8502/health')"
 
-# Run both Streamlit GUI and FastAPI server
-CMD ["bash", "-c", "streamlit run /app/src/pdf_ocr_compress/gui/basic.py & python -m uvicorn pdf_ocr_compress.api.server:app --host 0.0.0.0 --port 8502 & wait"]
+# Run via start_services.sh — its SIGTERM/SIGINT trap is what makes
+# `docker stop` shut down Streamlit and uvicorn cleanly. An inline
+# CMD without that trap leaves the children orphaned on the kernel's
+# 10-second SIGKILL timer.
+CMD ["bash", "/app/start_services.sh"]
