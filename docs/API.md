@@ -341,7 +341,7 @@ Returned by `POST /api/process`. Every field is always present.
 | `reduction_percent` | float | Positive when output is smaller. Same magnitude as `pct_change`, opposite sign. |
 | `processing_time` | float | Wall-clock seconds. |
 | `ocr_ran` | bool | Whether OCR was executed. |
-| `ocr_skipped_reason` | string \| null | Reason OCR was skipped. `null` when OCR ran. Common values include `"input already has text layer"`. |
+| `ocr_skipped_reason` | string \| null | Reason OCR was skipped. `null` when OCR ran. Short snake_case tokens; current values are `"input_has_text_layer"` (auto-routing detected an existing text layer) and `"compress_only_mode"` (caller passed `mode=compress`). |
 | `preset_actually_used` | string | The preset that produced the output file. May differ from `preset` if the requested preset would have grown the file (oversize fallback ladder: requested → `smallest` → passthrough). |
 | `pdfminer_text_extractable` | bool | Post-hoc fidelity check: pdfminer was able to extract text from the output. A `false` value when `ocr_ran` is `true` indicates a serious problem (Phase 0 bug #3 territory). |
 | `pct_change` | float | Negative when output shrunk; positive when output grew. |
