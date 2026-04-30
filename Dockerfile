@@ -15,13 +15,15 @@ WORKDIR /app
 # Install Python deps from pyproject.toml so the image picks up version
 # floors maintained in one place. README.md is required because pyproject
 # references it as `readme`.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY src/ ./src/
 RUN pip install --no-cache-dir .
 
 COPY .streamlit/ ./.streamlit/
 COPY start_services.sh .
-RUN chmod +x start_services.sh
+# Strip Windows CRLF line endings that break bash on Linux when the script
+# is authored on Windows. sed is always available in python:*-slim.
+RUN sed -i 's/\r//' start_services.sh && chmod +x start_services.sh
 
 # Run as a non-root user (defense-in-depth). UID/GID 1000 matches the
 # typical first-user UID on Linux distros so bind-mounted directories
