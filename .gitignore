@@ -181,6 +181,9 @@ Thumbs.db
 # Streamlit
 .streamlit/
 
+# Playwright MCP DOM-snapshot artifacts (created during screenshot-driving sessions)
+.playwright-mcp/
+
 # Temporary files
 *.tmp
 *.temp
