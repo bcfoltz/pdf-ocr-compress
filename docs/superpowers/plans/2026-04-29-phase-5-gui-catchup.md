@@ -486,7 +486,7 @@ def _render_defaults_panel(cfg) -> None:
         new_output_dir_str = st.text_input(
             "Default output directory (blank = unset)",
             value=str(s.default_output_dir) if s.default_output_dir else "",
-            placeholder=r"e.g. G:\My Drive\Book Scans\Processed",
+            placeholder=r"e.g. D:\Scans\Processed",
             key="def_output_dir",
         )
         new_batch_concurrency = st.slider(
@@ -969,7 +969,7 @@ Replace with:
     else:
         batch_input_folder_str = st.text_input(
             "Input folder (contains PDFs to process)",
-            placeholder=r"e.g. G:\My Drive\Book Scans\Inbox",
+            placeholder=r"e.g. D:\Scans\Inbox",
             key="batch_in_folder",
         )
         batch_output_folder_str = st.text_input(

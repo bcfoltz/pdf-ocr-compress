@@ -11,6 +11,14 @@ processed via `/api/process` and batch jobs queued via `/api/batch`
 are retained for 1 hour and survive uvicorn restarts (SQLite-backed,
 Phase 4).
 
+**Do not expose port 8502 to untrusted networks.** The server binds
+`0.0.0.0` by default (Docker/uvicorn defaults), accepts arbitrary
+server-side filesystem paths in `POST /api/batch`, and has no
+authentication. The single-machine assumption is the security model;
+running this behind a reverse proxy without auth on a public network
+would let any caller trigger processing of any directory the API
+process can read.
+
 ## Quickstart
 
 Process one PDF end-to-end with curl:
@@ -481,3 +489,10 @@ archival-format file whose textual content is still image-only.
 - **Interactive docs.** `/docs` (Swagger UI) is generated from the
   same OpenAPI schema this document describes; it's the canonical
   cross-check if anything here goes out of date.
+- **No upload size limit is currently enforced.** The `/api/process`
+  endpoint reads the full upload into memory before writing to disk,
+  so very large files (multi-GB) will exhaust the API process's
+  memory before any error is returned. The `FILE_TOO_LARGE` error
+  code is reserved for a future limit; for now, prefer
+  `POST /api/batch` (server-side folder path, no upload) for files
+  larger than ~1 GB.

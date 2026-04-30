@@ -114,8 +114,8 @@ class BatchReport:
 
 ```json
 {
-  "input_dir": "G:/My Drive/Book Scans/Marketing",
-  "output_dir": "G:/My Drive/Book Scans/Marketing/processed",
+  "input_dir": "/data/scans/Marketing",
+  "output_dir": "/data/scans/Marketing/processed",
   "total_files": 49,
   "succeeded": 47,
   "failed": 2,
@@ -126,8 +126,8 @@ class BatchReport:
   "total_output_bytes": 281400000,
   "results": [
     {
-      "input_path": ".../torres.pdf",
-      "output_path": ".../processed/torres_processed_20260429-101403-221555.pdf",
+      "input_path": ".../sample_a.pdf",
+      "output_path": ".../processed/sample_a_processed_20260429-101403-221555.pdf",
       "status": "ok",
       "attempts": 1,
       "error_msg": null,
@@ -222,8 +222,8 @@ Existing `/api/process` and `/api/download/{file_id}` are unchanged.
 
 ```json
 {
-  "folder": "G:/My Drive/Book Scans/Marketing",
-  "output_dir": "G:/My Drive/Book Scans/Marketing/processed",
+  "folder": "/data/scans/Marketing",
+  "output_dir": "/data/scans/Marketing/processed",
   "mode": "auto",
   "preset": "smallest",
   "language": "eng",

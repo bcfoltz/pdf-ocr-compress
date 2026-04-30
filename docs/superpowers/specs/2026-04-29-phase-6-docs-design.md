@@ -415,7 +415,7 @@ instead of two.
 #### Memory file update
 
 After commit 4 lands, update
-`C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\project_phase_status.md`
+`<user-claude-memory-dir>/project_phase_status.md`
 to reflect "Phase 6 closed (2026-04-29); roadmap complete; project
 in maintenance" so future sessions don't think there's still phase
 work to do. `MEMORY.md` index entry gets a one-line update to match.

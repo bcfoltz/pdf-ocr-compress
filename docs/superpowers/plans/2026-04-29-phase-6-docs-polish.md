@@ -14,7 +14,7 @@
 
 ## Context for the implementing engineer
 
-You are operating in a Windows + bash environment (`C:\Users\bcfol\OneDrive\Documents\vscode\pdf_ocr_compress`). All `git` commits should be authored by the user's standard identity — do not pass `--no-verify` and do not change `git config`.
+You are operating in a Windows + bash environment (`<repo>`). All `git` commits should be authored by the user's standard identity — do not pass `--no-verify` and do not change `git config`.
 
 You have these tools available without further setup:
 
@@ -53,8 +53,8 @@ If at any task you find a contradiction between this plan and what the source ac
 
 **Files outside the repo that this plan updates** (not under `git`):
 
-- `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\project_phase_status.md` (Task 5)
-- `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\MEMORY.md` (Task 5 — one-line index update)
+- `<user-claude-memory-dir>/project_phase_status.md` (Task 5)
+- `<user-claude-memory-dir>/MEMORY.md` (Task 5 — one-line index update)
 
 **Files this plan must not touch:**
 
@@ -254,7 +254,7 @@ Click into the Batch tab. Confirm via `browser_snapshot` that the visible UI sho
 - The output-folder field with its own Browse button
 - The resolver-summary preview line (shown once a folder path is typed in)
 
-Optional: type a sample folder path into the input (e.g. `C:\Users\bcfol\OneDrive\Documents\vscode\pdf_ocr_compress\pdfs`) so the resolver-summary preview ("N PDFs, X.X MB total") is visible in the screenshot. Use a generic-looking path; do not include personal Drive paths.
+Optional: type a sample folder path into the input (e.g. `<repo>\pdfs`) so the resolver-summary preview ("N PDFs, X.X MB total") is visible in the screenshot. Use a generic-looking path; do not include personal Drive paths.
 
 Capture:
 
@@ -390,7 +390,7 @@ Note specifically: the `ProcessResult` field list (this becomes the nested schem
 
 - [ ] **Step 3.2: Write `docs/API.md`**
 
-Use `Write` with the file path `C:\Users\bcfol\OneDrive\Documents\vscode\pdf_ocr_compress\docs\API.md`. The full content to write:
+Use `Write` with the file path `<repo>\docs\API.md`. The full content to write:
 
 `````markdown
 # pdf-ocr-compress API reference
@@ -1357,15 +1357,15 @@ Expected: one commit, two files changed.
 
 **Files (outside repo):**
 
-- Modify: `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\project_phase_status.md`
-- Modify: `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\MEMORY.md` (one-line index update)
+- Modify: `<user-claude-memory-dir>/project_phase_status.md`
+- Modify: `<user-claude-memory-dir>/MEMORY.md` (one-line index update)
 
 - [ ] **Step 5.1: Read the current memory files**
 
 Use `Read` on both:
 
-- `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\project_phase_status.md`
-- `C:\Users\bcfol\.claude\projects\C--Users-bcfol-OneDrive-Documents-vscode-pdf-ocr-compress\memory\MEMORY.md`
+- `<user-claude-memory-dir>/project_phase_status.md`
+- `<user-claude-memory-dir>/MEMORY.md`
 
 - [ ] **Step 5.2: Rewrite `project_phase_status.md`**
 

@@ -46,9 +46,9 @@ Ghostscript must be on PATH for the OCR steps. Record results inline
       shows correct name + size.
 - [X] Click "Process". Same banner / saved-to / download behavior.
 - [X] **Real-world load-bearing case**: point local-path mode at one
-      of the multi-GB ScanSnap textbook scans (e.g. the Longenecker
-      sample). Verify the GUI doesn't choke on the size and the
-      pipeline runs end-to-end. This is the workflow shape the
+      of the multi-GB ScanSnap textbook scans (e.g. a multi-GB color
+      textbook scan). Verify the GUI doesn't choke on the size and
+      the pipeline runs end-to-end. This is the workflow shape the
       project is designed for; the upload mode physically can't
       handle it.
 
@@ -127,7 +127,7 @@ Ghostscript must be on PATH for the OCR steps. Record results inline
 - [X] Restore `Default preset` to `smallest`.
 - [X] Stop the Streamlit server.
 
-Run completed: 2026-04-29 by Brandon Foltz.
+Run completed: 2026-04-29.
 
 ## Findings (issues surfaced and fixed live)
 
