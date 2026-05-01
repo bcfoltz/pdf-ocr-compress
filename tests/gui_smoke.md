@@ -155,7 +155,7 @@ here for the historical record.
    (works because the Streamlit server runs on the same machine as
    the browser — single-user local app), wired up Browse buttons next
    to the Defaults expander's `default_output_dir` field and both
-   batch local-folder fields. Headless / Docker fallback raises
+   batch local-folder fields. Headless fallback raises
    `RuntimeError` with a friendly message.
 4. **Browse button crashed the page on click.** Streamlit raises
    `StreamlitAPIException` when you mutate `st.session_state[k]` after

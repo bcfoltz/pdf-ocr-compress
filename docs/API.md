@@ -4,18 +4,18 @@ REST API for the pdf-ocr-compress backend service. Designed to be
 called from RAG ingestion pipelines that need OCR + compression on
 large folders of scanned PDFs.
 
-The server binds to port 8502 by default (Docker, `start_services.sh`,
-or `uv run python -m uvicorn pdf_ocr_compress.api.server:app --port 8502`).
-There is no authentication — single-machine assumption. Files
-processed via `/api/process` and batch jobs queued via `/api/batch`
-are retained for 1 hour and survive uvicorn restarts.
+The server binds to port 8502 by default (`uv run python -m uvicorn
+pdf_ocr_compress.api.server:app --port 8502`). There is no
+authentication — single-machine assumption. Files processed via
+`/api/process` and batch jobs queued via `/api/batch` are retained
+for 1 hour and survive uvicorn restarts.
 
-**Do not expose port 8502 to untrusted networks.** The server binds
-`0.0.0.0` by default (Docker/uvicorn defaults), accepts arbitrary
-server-side filesystem paths in `POST /api/batch`, and has no
-authentication. The single-machine assumption is the security model;
-running this behind a reverse proxy without auth on a public network
-would let any caller trigger processing of any directory the API
+**Do not expose port 8502 to untrusted networks.** The API accepts
+arbitrary server-side filesystem paths in `POST /api/batch` and has
+no authentication. The single-machine assumption is the security
+model; running this behind a reverse proxy without auth on a public
+network — or passing `--host 0.0.0.0` to uvicorn on an open network
+— would let any caller trigger processing of any directory the API
 process can read.
 
 ## Quickstart

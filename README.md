@@ -7,9 +7,9 @@ clients:
 
 - **GUI** (Streamlit, single page) — easiest place to start; drag a
   file in, get a processed file out.
-- **Docker / REST API** (FastAPI) — the load-bearing surface for
-  programmatic use; designed to be called from other apps that
-  ingest folders of scanned books into LLM/RAG pipelines.
+- **REST API** (FastAPI) — the load-bearing surface for programmatic
+  use; designed to be called from other apps that ingest folders of
+  scanned books into LLM/RAG pipelines.
 - **CLI** (Typer) — for scripting and cron jobs.
 
 Single-machine, single-user. No auth, no telemetry, no remote
@@ -58,21 +58,16 @@ post-hoc text-extractability smoke check.
 
 ![Post-process structured report](images/streamlit_ending_ui.png)
 
-### Docker / backend service
+### Backend service (REST API)
 
-The Docker image runs the GUI and the API together. Compose is the
-easiest way:
+Run the API directly with uvicorn:
 
 ```bash
-docker-compose up
-# GUI:      http://localhost:8501
+uv sync
+uv run python -m uvicorn pdf_ocr_compress.api.server:app --port 8502
 # API:      http://localhost:8502
 # API docs: http://localhost:8502/docs   (interactive Swagger UI)
 ```
-
-To add Tesseract languages, edit the `apt-get install` line in
-`Dockerfile` (e.g. `tesseract-ocr-spa tesseract-ocr-fra`) and
-rebuild.
 
 **Calling the API from another app?** See [`docs/API.md`](docs/API.md)
 for the full endpoint reference, request/response schemas, error
@@ -113,7 +108,7 @@ report is written to `<output_dir>/batch_report.json` (schema in
 - **Ghostscript** on PATH (auto-detects `gswin64c` / `gswin32c` /
   `gs`).
 - **uv** is recommended; `pip install -r requirements.txt` works
-  too. The Docker image installs everything.
+  too.
 
 ### Installing system tools
 
@@ -148,8 +143,8 @@ sudo pacman -S tesseract tesseract-data-eng ghostscript tk
 
 `python3-tk` (or the distro equivalent) is needed for the GUI's
 "Browse" folder picker. Without it the picker raises a friendly error
-and you'll need to type folder paths by hand. Headless / Docker
-environments work fine without it. For other Tesseract languages,
+and you'll need to type folder paths by hand. Headless environments
+work fine without it. For other Tesseract languages,
 add packages like `tesseract-ocr-spa` (Debian) / `tesseract-langpack-spa`
 (Fedora) / `tesseract-data-spa` (Arch).
 

@@ -313,22 +313,32 @@ def _pick_folder_dialog(initialdir: str | None = None) -> str | None:
 
     Returns the chosen absolute path as a string, or None if the user
     cancelled. Raises RuntimeError if no GUI display is available
-    (Docker/headless), so callers can surface a friendly fallback.
+    (headless Linux), so callers can surface a friendly fallback.
 
     Streamlit itself can't open a native folder picker (browser sandbox
     blocks it), but this app is local-machine only — the Streamlit
     server runs on the same box as the user's browser, so a server-side
     Tk dialog opens in front of the user just fine.
     """
-    import tkinter as tk
-    from tkinter import filedialog
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError as exc:
+        # Some minimal Linux installs ship the tkinter Python wrapper
+        # without libtk's shared library, so the import itself fails.
+        # Surface the same friendly fallback as the no-display case
+        # below.
+        raise RuntimeError(
+            "Folder picker is unavailable in this environment "
+            "(Tk libraries not installed). Type the path manually instead."
+        ) from exc
 
     try:
         root = tk.Tk()
     except tk.TclError as exc:
         raise RuntimeError(
             "Folder picker requires a display (not available in headless "
-            "or Docker environments). Type the path manually instead."
+            "environments). Type the path manually instead."
         ) from exc
 
     try:

@@ -8,7 +8,7 @@ A backend service for turning scanned PDFs into clean, searchable, RAG-ready fil
 - **GUI** (Streamlit, single page) — drop-a-file diagnostics for one-off inputs.
 - **REST API** (FastAPI) — the load-bearing surface, intended to be called from other apps that ingest large folders of scanned books into LLM/RAG pipelines.
 
-Designed for real-world scanner output (B&W book scans through multi-GB color textbook scans), not toy PDFs. Runs locally or in Docker. No remote services, no auth, no telemetry.
+Designed for real-world scanner output (B&W book scans through multi-GB color textbook scans), not toy PDFs. Runs natively on Windows / macOS / Linux. No remote services, no auth, no telemetry.
 
 ## Design rules
 
@@ -78,17 +78,6 @@ uv run python -c "from pdf_ocr_compress.gui import main_gui; print('GUI ok')"   
 
 For real PDF processing, drop a sample into `pdfs/` (gitignored except `sample*.pdf` / `test*.pdf`) and run end-to-end.
 
-### Docker
-
-```bash
-docker-compose up
-# GUI:      http://localhost:8501
-# API:      http://localhost:8502
-# API docs: http://localhost:8502/docs
-```
-
-`Dockerfile` is Python 3.11-slim + Tesseract (English only) + Ghostscript. To add Tesseract languages, edit the `apt-get install` line (e.g. add `tesseract-ocr-spa tesseract-ocr-fra`) and rebuild.
-
 ### Env vars / secrets
 
 None. There is no `.env`, no API keys, no remote services.
@@ -120,7 +109,6 @@ src/pdf_ocr_compress/
 Top-level directories worth knowing:
 
 - `pdfs/` — scratch directory for input/output PDFs; gitignored except `sample*.pdf` / `test*.pdf`
-- `Dockerfile`, `docker-compose.yml`, `start_services.sh` — container setup (runs Streamlit + Uvicorn together)
 - `pyproject.toml` — single source of truth for dependencies; `requirements.txt` mirrors it for `pip install -r` users
 
 ## Conventions in this project
@@ -140,11 +128,20 @@ of the modernization are done. The project is in maintenance:
 bugfixes, small enhancements, and documentation patches as needed.
 There is no Phase 7.
 
+**Post-Phase-6 cleanup (2026-04-30):** Docker support removed
+(`Dockerfile`, `docker-compose.yml`, `start_services.sh`,
+`.dockerignore`). The maintainer's actual workflow is native
+Windows + Google Drive paths, where bind-mounting Drive File Stream
+into a container is slow and flaky and the GUI's Tk folder picker
+can't traverse the host filesystem from inside the container.
+Native `uv run` is the only supported runtime now. Don't
+reintroduce Docker scaffolding without a real use case.
+
 **Phase 6 deliverables:**
 
 - README rewritten as a real project README — GUI-first quickstart
-  for casual readers, Docker / API for backend integrators, CLI
-  for scripting. Sample B headline (4.8 GB → 198 MB) above the
+  for casual readers, REST API for backend integrators, CLI for
+  scripting. Sample B headline (4.8 GB → 198 MB) above the
   fold. Stale Streamlit screenshots refreshed against the Phase 5
   GUI. Old `python -m pdf_ocr_compress ...` invocations replaced
   with the installed `pdf-ocr` entry point. Python floor corrected

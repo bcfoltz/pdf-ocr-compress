@@ -1,5 +1,4 @@
-# Force LF line endings for files that are executed inside Linux containers.
-# Without this, Windows git clients check out these files with CRLF, which
-# breaks bash inside the container ("$'\r': command not found").
+# Force LF line endings for shell scripts that may be executed in Linux
+# environments. Without this, Windows git clients check out these files
+# with CRLF, which breaks bash ("$'\r': command not found").
 *.sh text eol=lf
-Dockerfile text eol=lf
