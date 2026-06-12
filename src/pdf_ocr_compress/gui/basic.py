@@ -487,6 +487,7 @@ def main():
         # Determine input path. Uploads still need a writable workdir to
         # land the input bytes; reuse a tempdir for that even when out_dir
         # is the user's default_output_dir.
+        input_workdir = None
         if source_mode == "Upload in browser":
             input_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_in_"))
             in_stem = Path(uploaded.name).stem
@@ -494,6 +495,9 @@ def main():
             try:
                 _chunk_copy(uploaded, in_path)
             except Exception as e:
+                shutil.rmtree(input_workdir, ignore_errors=True)
+                if out_source in ("fallback", "fallback_after_unwritable"):
+                    shutil.rmtree(out_dir, ignore_errors=True)
                 _render_error(e)
                 st.stop()
         else:
@@ -550,6 +554,10 @@ def main():
                 )
                 status.update(label="Processing complete ✅", state="complete")
         except Exception as e:
+            if input_workdir is not None:
+                shutil.rmtree(input_workdir, ignore_errors=True)
+            if out_source in ("fallback", "fallback_after_unwritable"):
+                shutil.rmtree(out_dir, ignore_errors=True)
             _render_error(e)
             st.stop()
 
@@ -621,8 +629,10 @@ def main():
                     language="bash",
                 )
         finally:
-            # Temp dir stays for the session; manual cleanup is fine for very large outputs.
-            pass
+            if input_workdir is not None:
+                shutil.rmtree(input_workdir, ignore_errors=True)
+            if out_source in ("fallback", "fallback_after_unwritable"):
+                shutil.rmtree(out_dir, ignore_errors=True)
 
     # --- Batch section ---
     st.divider()
@@ -728,6 +738,7 @@ def main():
         # returned paths, so we only call _timestamped_batch_subdir when
         # the resolver returned the user's `default_output_dir` directly
         # (out_source == "setting").
+        batch_workdir = None
         if batch_source == "Upload multiple PDFs in browser":
             batch_workdir = Path(tempfile.mkdtemp(prefix="pdfgui_batch_"))
             batch_in = batch_workdir / "input"
@@ -736,6 +747,7 @@ def main():
                 for uf in batch_uploads:
                     _chunk_copy(uf, batch_in / uf.name)
             except OSError as e:
+                shutil.rmtree(batch_workdir, ignore_errors=True)
                 _render_error(e)
                 st.stop()
 
@@ -797,6 +809,8 @@ def main():
                 progress_bar.progress(1.0, text="Done")
                 status.update(label="Batch complete ✅", state="complete")
         except Exception as e:
+            if batch_workdir is not None:
+                shutil.rmtree(batch_workdir, ignore_errors=True)
             _render_error(e)
             st.stop()
 
