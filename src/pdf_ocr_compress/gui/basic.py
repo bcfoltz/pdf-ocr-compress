@@ -31,17 +31,16 @@ except ImportError:
 
 
 def setup_streamlit():
-    """Configure Streamlit app settings."""
+    """Configure Streamlit app settings.
+
+    Upload limits are NOT set here: server.* options are frozen at
+    startup, so they live in the `pdf-ocr-gui` launcher argv (see
+    gui/__init__.py) and .streamlit/config.toml for repo-root
+    `streamlit run` invocations.
+    """
     st.set_page_config(
         page_title="PDF OCR + Compression", page_icon="🧰", layout="centered"
     )
-
-    # Bump Streamlit limits for big uploads (has no effect on local-path mode).
-    try:
-        st.set_option("server.maxUploadSize", 4096)  # MB
-        st.set_option("server.maxMessageSize", 4096)  # MB
-    except Exception:
-        pass
 
 
 def _human(nbytes: int) -> str:
@@ -475,6 +474,13 @@ def main():
 
     # --- Main processing ---
     if run_btn:
+        # Starting a fresh run — drop the previous run's persisted result
+        # and its retained fallback tempdir (kept alive only so the
+        # download button survived reruns).
+        prior_single = st.session_state.pop("single_result", None)
+        if prior_single and prior_single.get("owned_out_dir"):
+            shutil.rmtree(prior_single["owned_out_dir"], ignore_errors=True)
+
         # Resolve where the produced file should land. _resolve_output_dir
         # honors cfg.settings.default_output_dir when set; otherwise a fresh
         # tempdir is created.
@@ -561,78 +567,115 @@ def main():
             _render_error(e)
             st.stop()
 
-        produced_path = result.output_path
+        # The upload copy is no longer needed once the pipeline has
+        # produced its output; delete it immediately.
+        if input_workdir is not None:
+            shutil.rmtree(input_workdir, ignore_errors=True)
 
-        # Report & download
-        try:
-            delta_label = f"{abs(result.pct_change):.1f}% " + (
-                "smaller" if result.pct_change < 0 else "larger"
-            )
-            op_label = (
-                "OCR ran"
-                if result.ocr_ran
-                else f"OCR skipped ({result.ocr_skipped_reason})"
-            )
-            st.success(
-                f"Done in {result.processing_seconds:.1f}s • "
-                f"{_human(result.input_bytes)} → {_human(result.output_bytes)} "
-                f"({delta_label}) • {op_label} • preset: "
-                f"{result.preset_actually_used}"
-            )
-            if out_source in ("override", "setting"):
-                st.caption(f"📂 Saved to: `{result.output_path}`")
-            if not result.pdfminer_text_extractable:
-                st.warning(
-                    "pdfminer could not extract text from the output — RAG ingestion "
-                    "may treat this PDF as image-only."
-                )
-            with st.expander("Full report"):
-                st.json(result.to_dict())
+        # Persist everything the results section needs so it survives
+        # reruns triggered by any widget interaction (same pattern as the
+        # batch stash below — without it, touching a widget after a run
+        # erased the report and download button). A fallback tempdir
+        # holding the output is retained until the next run replaces it.
+        st.session_state["single_result"] = {
+            "report": result.to_dict(),
+            "in_stem": in_stem,
+            "in_name": in_path.name,
+            "out_name": out_base.name,
+            "mode": mode,
+            "out_source": out_source,
+            "owned_out_dir": (
+                str(out_dir)
+                if out_source in ("fallback", "fallback_after_unwritable")
+                else None
+            ),
+            "run_args": {
+                "lang": lang,
+                "preset": preset,
+                "pdfa": pdfa,
+                "jobs": jobs,
+                "force_ocr": force_ocr,
+            },
+        }
 
-            suffix = "_ocr" if mode == "OCR only" else "_processed"
-            dl_name = f"{in_stem}{suffix}.pdf"
+    # --- Persisted single-file result section ---
+    # Renders any time st.session_state["single_result"] is populated.
+    # Lives outside `if run_btn:` so download-button (or any widget)
+    # reruns don't tear it down.
+    single = st.session_state.get("single_result")
+    if single:
+        rep = single["report"]
+        delta_label = f"{abs(rep['pct_change']):.1f}% " + (
+            "smaller" if rep["pct_change"] < 0 else "larger"
+        )
+        op_label = (
+            "OCR ran"
+            if rep["ocr_ran"]
+            else f"OCR skipped ({rep['ocr_skipped_reason']})"
+        )
+        st.success(
+            f"Done in {rep['processing_seconds']:.1f}s • "
+            f"{_human(rep['input_bytes'])} → {_human(rep['output_bytes'])} "
+            f"({delta_label}) • {op_label} • preset: "
+            f"{rep['preset_actually_used']}"
+        )
+        if single["out_source"] in ("override", "setting"):
+            st.caption(f"📂 Saved to: `{rep['output_path']}`")
+        if not rep["pdfminer_text_extractable"]:
+            st.warning(
+                "pdfminer could not extract text from the output — RAG ingestion "
+                "may treat this PDF as image-only."
+            )
+        with st.expander("Full report"):
+            st.json(rep)
 
+        suffix = "_ocr" if single["mode"] == "OCR only" else "_processed"
+        dl_name = f"{single['in_stem']}{suffix}.pdf"
+
+        produced_path = Path(rep["output_path"])
+        if produced_path.exists():
+            # Pass the open handle, not f.read() — Streamlit drains it at
+            # call time without an extra whole-file bytes object in RAM.
             with open(produced_path, "rb") as f:
                 st.download_button(
                     "⬇️ Download processed PDF",
-                    data=f.read(),
+                    data=f,
                     file_name=dl_name,
                     mime="application/pdf",
                 )
 
-            # Equivalent CLI (for reproducibility).
-            # Use only the filename, not the full temp path — the temp dir
-            # is an upload artifact that doesn't survive beyond this session
-            # and contains local machine paths that would leak in screenshots.
-            in_name = in_path.name
-            out_name = out_base.name
-            st.caption("Equivalent CLI you could run in a terminal:")
-            if mode == "OCR only":
-                st.code(
-                    f'pdf-ocr ocr "{in_name}" "{out_name}" --lang {lang} --preset {preset}'
-                    + (" --pdfa" if pdfa else "")
-                    + (f" --jobs {jobs}" if jobs != 1 else "")
-                    + (" --force-ocr" if force_ocr else ""),
-                    language="bash",
-                )
-            elif mode == "Compress only":
-                st.code(
-                    f'pdf-ocr compress "{in_name}" "{out_name}" --preset {preset}',
-                    language="bash",
-                )
-            else:
-                st.code(
-                    f'pdf-ocr process "{in_name}" "{out_name}" --lang {lang} --preset {preset}'
-                    + (" --pdfa" if pdfa else "")
-                    + (f" --jobs {jobs}" if jobs != 1 else "")
-                    + (" --force-ocr" if force_ocr else ""),
-                    language="bash",
-                )
-        finally:
-            if input_workdir is not None:
-                shutil.rmtree(input_workdir, ignore_errors=True)
-            if out_source in ("fallback", "fallback_after_unwritable"):
-                shutil.rmtree(out_dir, ignore_errors=True)
+        # Equivalent CLI (for reproducibility).
+        # Use only the filename, not the full temp path — the temp dir
+        # is an upload artifact that doesn't survive beyond this session
+        # and contains local machine paths that would leak in screenshots.
+        in_name = single["in_name"]
+        out_name = single["out_name"]
+        run_args = single["run_args"]
+        st.caption("Equivalent CLI you could run in a terminal:")
+        if single["mode"] == "OCR only":
+            st.code(
+                f'pdf-ocr ocr "{in_name}" "{out_name}" '
+                f"--lang {run_args['lang']} --preset {run_args['preset']}"
+                + (" --pdfa" if run_args["pdfa"] else "")
+                + (f" --jobs {run_args['jobs']}" if run_args["jobs"] != 1 else "")
+                + (" --force-ocr" if run_args["force_ocr"] else ""),
+                language="bash",
+            )
+        elif single["mode"] == "Compress only":
+            st.code(
+                f'pdf-ocr compress "{in_name}" "{out_name}" '
+                f"--preset {run_args['preset']}",
+                language="bash",
+            )
+        else:
+            st.code(
+                f'pdf-ocr process "{in_name}" "{out_name}" '
+                f"--lang {run_args['lang']} --preset {run_args['preset']}"
+                + (" --pdfa" if run_args["pdfa"] else "")
+                + (f" --jobs {run_args['jobs']}" if run_args["jobs"] != 1 else "")
+                + (" --force-ocr" if run_args["force_ocr"] else ""),
+                language="bash",
+            )
 
     # --- Batch section ---
     st.divider()
@@ -724,8 +767,12 @@ def main():
 
     if batch_btn:
         # Starting a fresh batch — drop any prior run's persisted results
-        # so they don't show during the new run.
-        st.session_state.pop("batch_results", None)
+        # so they don't show during the new run, and delete the previous
+        # upload-mode batch workdir (kept alive only for its download
+        # buttons, which are gone now).
+        prior_batch = st.session_state.pop("batch_results", None)
+        if prior_batch and prior_batch.get("batch_workdir"):
+            shutil.rmtree(prior_batch["batch_workdir"], ignore_errors=True)
 
         pipeline_mode = {
             "OCR only": "ocr",
@@ -814,6 +861,13 @@ def main():
             _render_error(e)
             st.stop()
 
+        # Upload-mode inputs are full copies of every uploaded file and
+        # are never read again once run_batch returns — delete them now
+        # so multi-GB batches don't linger in the OS temp dir. Outputs
+        # stay: the persisted download buttons below read from them.
+        if batch_workdir is not None:
+            shutil.rmtree(batch_in, ignore_errors=True)
+
         # Build the final results table (in-flight `live_table` gets
         # the rich version below).
         final_rows = []
@@ -852,6 +906,7 @@ def main():
             "batch_out": batch_out,
             "out_source": out_source,
             "batch_source": batch_source,
+            "batch_workdir": str(batch_workdir) if batch_workdir else None,
             "ok_outputs": [
                 {
                     "input_name": r.input_path.name,
@@ -892,7 +947,7 @@ def main():
                     with open(output_path, "rb") as f:
                         st.download_button(
                             f"⬇️ Download {item['input_name']}",
-                            data=f.read(),
+                            data=f,
                             file_name=item["output_name"],
                             mime="application/pdf",
                             key=f"dl_{i}_{item['input_name']}",
@@ -904,7 +959,7 @@ def main():
             with open(report_path, "rb") as f:
                 st.download_button(
                     "⬇️ Download batch_report.json",
-                    data=f.read(),
+                    data=f,
                     file_name="batch_report.json",
                     mime="application/json",
                     key="dl_batch_report",

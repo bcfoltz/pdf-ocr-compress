@@ -165,12 +165,6 @@ These items were noted across Phases 4–5 as "honest gaps" and remain
 open after Phase 6 docs polish — none of them are documentation
 issues.
 
-- **GUI tempdir leaks on pipeline failure.** Phase 5 dropped the
-  pre-existing `shutil.rmtree(workdir)` cleanup when `workdir` got
-  split into `input_workdir` + the resolver-returned `out_dir`.
-  Single-file uploads (`pdfgui_in_*`) and upload-mode batches
-  (`pdfgui_batch_*`) leak on failure. For 5 GB scans that's
-  gigabytes per failed run. Fix: try/finally around the run blocks.
 - **Recursion into batch input subfolders.** `core/batch.py:_list_pdfs`
   is non-recursive; CLI/API/GUI all inherit that. Multi-surface
   change.

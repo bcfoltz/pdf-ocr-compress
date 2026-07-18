@@ -11,7 +11,18 @@ def main_gui() -> None:
     from streamlit.web import cli as st_cli
 
     script_path = Path(__file__).parent / "basic.py"
-    sys.argv = ["streamlit", "run", str(script_path)]
+    # Upload limits must be passed at launch: server.* options are fixed
+    # at startup (st.set_option can't change them), and the repo's
+    # .streamlit/config.toml is only found when the cwd is the repo root.
+    # Without these flags, `pdf-ocr-gui` run from any other directory
+    # silently reverts to Streamlit's 200 MB default upload cap.
+    sys.argv = [
+        "streamlit",
+        "run",
+        str(script_path),
+        "--server.maxUploadSize=8192",
+        "--server.maxMessageSize=8192",
+    ]
     sys.exit(st_cli.main())
 
 
