@@ -567,7 +567,6 @@ def main():
         # holding the output is retained until the next run replaces it.
         st.session_state["single_result"] = {
             "report": result.to_dict(),
-            "in_stem": in_stem,
             "in_name": in_path.name,
             "out_name": out_base.name,
             "mode": mode,
@@ -617,18 +616,17 @@ def main():
         with st.expander("Full report"):
             st.json(rep)
 
-        suffix = "_ocr" if single["mode"] == "OCR only" else "_processed"
-        dl_name = f"{single['in_stem']}{suffix}.pdf"
-
         produced_path = Path(rep["output_path"])
         if produced_path.exists():
             # Pass the open handle, not f.read() — Streamlit drains it at
             # call time without an extra whole-file bytes object in RAM.
+            # Download name = the actual on-disk name (same as batch mode);
+            # no synthetic _processed/_ocr suffix.
             with open(produced_path, "rb") as f:
                 st.download_button(
                     "⬇️ Download processed PDF",
                     data=f,
-                    file_name=dl_name,
+                    file_name=produced_path.name,
                     mime="application/pdf",
                 )
 
