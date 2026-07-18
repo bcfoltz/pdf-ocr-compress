@@ -16,9 +16,10 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       # The test suite shells out to real binaries (core/compress.py runs
-      # Ghostscript; OCR round-trip tests run Tesseract via OCRmyPDF).
+      # Ghostscript; OCR round-trip tests run Tesseract via OCRmyPDF, and
+      # the `smallest` preset's --optimize 3 requires pngquant).
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr ghostscript
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr ghostscript pngquant
 
       - name: Sync dependencies
         run: uv sync
