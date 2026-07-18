@@ -11,7 +11,7 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from ..config import get_config
@@ -325,10 +325,21 @@ async def health():
 @app.post(
     "/api/process",
     response_model=ProcessResponse,
-    responses=_PROCESS_ERROR_RESPONSES,
+    responses={
+        202: {
+            "description": (
+                "Accepted (background=true): processing continues in the "
+                "background. Body: {status: 'queued', job_id}. Poll "
+                "GET /api/batch/{job_id}/status; when done, download via "
+                "GET /api/download/{job_id}."
+            ),
+        },
+        **_PROCESS_ERROR_RESPONSES,
+    },
     summary="Process one PDF (OCR + compression)",
 )
 def process_pdf(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF file to process"),
     mode: str = Form(
         "auto",
@@ -364,6 +375,17 @@ def process_pdf(
         description=(
             "Number of parallel OCR workers (passed to OCRmyPDF). "
             "Default from settings (factory default: 4)."
+        ),
+    ),
+    background: bool = Form(
+        False,
+        description=(
+            "Return 202 immediately and process in the background. The "
+            "returned job_id doubles as the file_id: poll "
+            "GET /api/batch/{job_id}/status, then download via "
+            "GET /api/download/{job_id}. Recommended for large files — "
+            "the synchronous path holds the HTTP connection for the "
+            "entire run."
         ),
     ),
 ):
@@ -435,6 +457,67 @@ def process_pdf(
                         ],
                     )
                 f.write(chunk)
+
+        if background:
+            # Queue-then-poll (P-003): reuse the batch job store. The
+            # job_id doubles as the file_id, so the existing status and
+            # download endpoints cover the whole flow. Validation and the
+            # upload save above already happened synchronously — only the
+            # pipeline run is deferred.
+            job_storage = _storage()
+            job_storage.insert_batch_job(
+                job_id=file_id,
+                status="queued",
+                started_at=datetime.now().isoformat(timespec="milliseconds"),
+                progress_total=1,
+            )
+            original_name = file.filename
+
+            def _run_single() -> None:
+                try:
+                    job_storage.update_batch_progress(
+                        file_id, progress_current=0, progress_total=1
+                    )
+                    result = run_pipeline(
+                        input_path,
+                        output_base,
+                        mode=mode,
+                        lang=language,
+                        preset=preset,
+                        pdfa=pdfa,
+                        jobs=jobs,
+                        force_ocr=force_ocr,
+                    )
+                    job_storage.insert_file(
+                        file_id=file_id,
+                        original_name=original_name,
+                        output_path=result.output_path,
+                        workdir=workdir,
+                        mode=mode,
+                        preset=preset,
+                    )
+                    job_storage.update_batch_progress(
+                        file_id, progress_current=1, progress_total=1
+                    )
+                    job_storage.finish_batch_job(
+                        file_id,
+                        status="done",
+                        finished_at=datetime.now().isoformat(timespec="milliseconds"),
+                        report_json=json.dumps({"process_result": result.to_dict()}),
+                    )
+                except Exception as e:  # noqa: BLE001 — surface via the job status row
+                    shutil.rmtree(workdir, ignore_errors=True)
+                    job_storage.finish_batch_job(
+                        file_id,
+                        status="error",
+                        finished_at=datetime.now().isoformat(timespec="milliseconds"),
+                        error_msg=str(e),
+                    )
+
+            background_tasks.add_task(_run_single)
+            return JSONResponse(
+                status_code=202, content={"status": "queued", "job_id": file_id}
+            )
 
         # Run the unified pipeline; it builds the structured ProcessResult
         # report we surface in the response.

@@ -100,6 +100,7 @@ Form parameters:
 | `pdfa` | bool | `false` | Produce PDF/A-2 output. See "PDF/A flag" below. |
 | `force_ocr` | bool | `false` | Force OCR even if a text layer is already present. |
 | `jobs` | int | settings default (factory: `4`) | Number of parallel OCR workers passed to OCRmyPDF. |
+| `background` | bool | `false` | Return `202` immediately and process in the background. See "Background processing" below. Recommended for large files — the synchronous path holds the HTTP connection for the entire run (potentially hours). |
 
 curl example:
 
@@ -136,11 +137,32 @@ Response: `ProcessResponse` (see schema section below).
 
 Status codes:
 
-- `200` — success
+- `200` — success (synchronous path)
+- `202` — accepted (`background=true`; body `{"status": "queued", "job_id": "..."}`)
 - `400` — `INPUT_NOT_PDF`, `INVALID_MODE`, `INVALID_PRESET`
+- `413` — `FILE_TOO_LARGE` (only when `max_upload_bytes` is set)
 - `422` — `VALIDATION_ERROR` (request body failed pydantic validation)
 - `500` — `PROCESSING_FAILED`, `OUTPUT_GREW_NO_FALLBACK`
 - `503` — `OCR_TOOL_MISSING`, `GHOSTSCRIPT_TOOL_MISSING`
+
+#### Background processing
+
+With `background=true` the endpoint validates the request, saves the
+upload, and returns `202` with a `job_id` — only the pipeline run is
+deferred. The `job_id` doubles as the `file_id`:
+
+1. Poll `GET /api/batch/{job_id}/status` — same endpoint batch jobs use.
+   `status` moves `queued` → `running` → `done` (or `error`, with the
+   message in `error_msg`). On `done`, `report.process_result` carries
+   the full `ProcessResult`.
+2. Download with `GET /api/download/{job_id}`.
+
+Notes: validation failures (bad mode/preset/file, `FILE_TOO_LARGE`) are
+still synchronous 4xx responses — a `202` means the upload was accepted.
+The 1-hour retention clock starts when processing completes, not when
+the job is queued. If the server restarts mid-job, the job is marked
+`error` ("server restarted mid-job") on the next startup, like any
+batch job.
 
 ### `GET /api/download/{file_id}`
 
