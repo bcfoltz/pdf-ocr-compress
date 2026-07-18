@@ -8,6 +8,7 @@ from .config import get_config
 from .core.batch import run_batch
 from .core.pipeline import run_pipeline
 from .utils.errors import PDFProcessingError
+from .utils.logging_config import setup_logging
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -158,6 +159,10 @@ def main():
     failures) render their user_message + suggestions instead of a
     traceback; anything unexpected still tracebacks for bug reports.
     """
+    # Attach a console handler so pipeline INFO messages (notably the
+    # oversize-fallback audit trail in core/oversize.py) are visible;
+    # without this, only WARNING+ escapes via Python's last-resort handler.
+    setup_logging(structured_logging=False)
     try:
         app()
     except PDFProcessingError as exc:

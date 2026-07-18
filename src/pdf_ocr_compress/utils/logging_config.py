@@ -3,7 +3,7 @@
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -13,7 +13,7 @@ class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -168,13 +168,3 @@ def get_performance_logger(name: str = "performance") -> PerformanceLogger:
     """Get a performance logger instance."""
     logger = get_logger(name)
     return PerformanceLogger(logger)
-
-
-# Convenience function for user action logging
-def log_user_action(action: str, **kwargs):
-    """Log user actions for audit trail."""
-    logger = get_logger("user_actions")
-    logger.info(
-        f"User action: {action}",
-        extra={"extra_data": {"event_type": "user_action", "action": action, **kwargs}},
-    )

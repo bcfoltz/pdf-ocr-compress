@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from ..config import get_config
 from ..core.batch import run_batch
 from ..core.pipeline import run_pipeline
+from ..utils.logging_config import setup_logging
 from .errors import (
     BATCH_JOB_NOT_FOUND,
     FILE_NOT_FOUND,
@@ -32,6 +33,11 @@ from .errors import (
     install_exception_handlers,
 )
 from .storage import Storage, default_storage
+
+# Attach a console handler at import time so pipeline INFO messages
+# (notably the oversize-fallback audit trail) reach uvicorn's console.
+# setup_logging clears existing handlers first, so re-imports are safe.
+setup_logging(structured_logging=False)
 
 app = FastAPI(
     title="PDF OCR + Compression API",

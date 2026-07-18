@@ -1,6 +1,5 @@
 """Enhanced error handling and user-friendly error messages."""
 
-import sys
 from pathlib import Path
 
 
@@ -78,77 +77,6 @@ class PDFFormatError(PDFProcessingError):
         )
 
 
-class InsufficientResourcesError(PDFProcessingError):
-    """Error when system resources are insufficient."""
-
-    def __init__(self, resource_type: str, required: str, available: str = None):
-        message = f"Insufficient {resource_type}: requires {required}"
-        if available:
-            message += f", available: {available}"
-
-        suggestions = [
-            f"Close other applications to free up {resource_type}",
-            "Try processing a smaller file first",
-            "Consider using a machine with more resources",
-        ]
-
-        if resource_type == "memory":
-            suggestions.extend(
-                [
-                    "Reduce the number of parallel jobs (--jobs parameter)",
-                    "Process the PDF in smaller chunks if possible",
-                ]
-            )
-        elif resource_type == "disk space":
-            suggestions.extend(
-                [
-                    "Free up disk space on your system",
-                    "Clean temporary files",
-                    "Specify a different temporary directory with more space",
-                ]
-            )
-
-        super().__init__(
-            message=message,
-            user_message=f"Not enough {resource_type} available to process this file",
-            suggestions=suggestions,
-            error_code=f"INSUFFICIENT_{resource_type.upper()}",
-        )
-
-
-class FileAccessError(PDFProcessingError):
-    """Error when files cannot be accessed."""
-
-    def __init__(
-        self, file_path: Path, operation: str, original_error: Exception = None
-    ):
-        message = f"Cannot {operation} file: {file_path}"
-        if original_error:
-            message += f" ({original_error})"
-
-        suggestions = [
-            "Check that the file exists and you have permission to access it",
-            "Ensure the file is not open in another application",
-            "Verify the file path is correct",
-        ]
-
-        if operation == "write":
-            suggestions.extend(
-                [
-                    "Check that you have write permissions to the output directory",
-                    "Ensure there is enough free disk space",
-                    "Try using a different output location",
-                ]
-            )
-
-        super().__init__(
-            message=message,
-            user_message=f"Cannot {operation} '{file_path.name}'",
-            suggestions=suggestions,
-            error_code=f"FILE_{operation.upper()}_ERROR",
-        )
-
-
 def format_error_for_user(error: Exception) -> tuple[str, list, str | None]:
     """
     Format any exception for user-friendly display.
@@ -218,32 +146,3 @@ def format_error_for_user(error: Exception) -> tuple[str, list, str | None]:
         ],
         f"GENERIC_{error_type.upper()}",
     )
-
-
-def create_error_report(error: Exception, context: dict = None) -> dict:
-    """Create a detailed error report for debugging."""
-    user_msg, suggestions, error_code = format_error_for_user(error)
-
-    report = {
-        "error_code": error_code,
-        "user_message": user_msg,
-        "suggestions": suggestions,
-        "technical_details": {
-            "exception_type": type(error).__name__,
-            "exception_message": str(error),
-            "python_version": sys.version,
-            "platform": sys.platform,
-        },
-    }
-
-    if context:
-        report["context"] = context
-
-    if hasattr(error, "__traceback__") and error.__traceback__:
-        import traceback
-
-        report["technical_details"]["traceback"] = traceback.format_tb(
-            error.__traceback__
-        )
-
-    return report

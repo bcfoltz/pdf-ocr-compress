@@ -3,31 +3,23 @@
 import io
 import os
 import shutil
-import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
-# Add src to path for imports
-if __name__ == "__main__" and __package__ is None:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 import streamlit as st
 
-try:
-    from .config import get_config
-    from .config.settings import AppSettings
-    from .core.batch import run_batch
-    from .core.detect import needs_ocr
-    from .core.pipeline import run_pipeline
-    from .utils.errors import format_error_for_user
-except ImportError:
-    from pdf_ocr_compress.config import get_config
-    from pdf_ocr_compress.config.settings import AppSettings
-    from pdf_ocr_compress.core.batch import run_batch
-    from pdf_ocr_compress.core.detect import needs_ocr
-    from pdf_ocr_compress.core.pipeline import run_pipeline
-    from pdf_ocr_compress.utils.errors import format_error_for_user
+# Absolute imports work under both launch modes (`pdf-ocr-gui` and
+# `streamlit run .../basic.py`): the package is installed in the venv, so
+# no path shims or relative-import fallbacks are needed.
+from pdf_ocr_compress.config import get_config
+from pdf_ocr_compress.config.settings import AppSettings
+from pdf_ocr_compress.core.batch import run_batch
+from pdf_ocr_compress.core.detect import needs_ocr
+from pdf_ocr_compress.core.pipeline import run_pipeline
+from pdf_ocr_compress.utils.errors import format_error_for_user
+from pdf_ocr_compress.utils.file_utils import human_readable_size
+from pdf_ocr_compress.utils.logging_config import setup_logging
 
 
 def setup_streamlit():
@@ -41,15 +33,6 @@ def setup_streamlit():
     st.set_page_config(
         page_title="PDF OCR + Compression", page_icon="🧰", layout="centered"
     )
-
-
-def _human(nbytes: int) -> str:
-    """Convert bytes to human readable format."""
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if nbytes < 1024 or unit == "TB":
-            return f"{nbytes:.1f} {unit}" if unit != "B" else f"{nbytes} {unit}"
-        nbytes /= 1024
-    return f"{nbytes:.1f} TB"
 
 
 def _chunk_copy(
@@ -109,7 +92,7 @@ def _collect_local_folder_inputs(folder_str: str) -> dict:
     total_bytes = sum(p.stat().st_size for p in pdfs)
     return {
         "valid": True,
-        "msg": f"Found {len(pdfs)} PDFs ({_human(total_bytes)}) in {folder}",
+        "msg": f"Found {len(pdfs)} PDFs ({human_readable_size(total_bytes)}) in {folder}",
         "pdf_count": len(pdfs),
         "total_bytes": total_bytes,
     }
@@ -358,6 +341,9 @@ def _pick_folder_dialog(initialdir: str | None = None) -> str | None:
 
 def main():
     """Main Streamlit application."""
+    # Attach a console handler so pipeline INFO messages (notably the
+    # oversize-fallback audit trail) reach the terminal running streamlit.
+    setup_logging(structured_logging=False)
     setup_streamlit()
 
     st.title("🧰 PDF OCR + Compression")
@@ -460,13 +446,15 @@ def main():
                 uploaded.seek(pos, os.SEEK_SET)
             except Exception:
                 size = 0
-        st.info(f"Selected: **{uploaded.name}** • Size: {_human(size)}")
+        st.info(f"Selected: **{uploaded.name}** • Size: {human_readable_size(size)}")
 
     if source_mode == "Use local file path (no size limit)" and local_path_str.strip():
         p = Path(local_path_str)
         if p.exists() and p.is_file():
             try:
-                st.info(f"Selected: **{p.name}** • Size: {_human(p.stat().st_size)}")
+                st.info(
+                    f"Selected: **{p.name}** • Size: {human_readable_size(p.stat().st_size)}"
+                )
             except Exception:
                 st.info(f"Selected: **{p.name}**")
         else:
@@ -615,7 +603,7 @@ def main():
         )
         st.success(
             f"Done in {rep['processing_seconds']:.1f}s • "
-            f"{_human(rep['input_bytes'])} → {_human(rep['output_bytes'])} "
+            f"{human_readable_size(rep['input_bytes'])} → {human_readable_size(rep['output_bytes'])} "
             f"({delta_label}) • {op_label} • preset: "
             f"{rep['preset_actually_used']}"
         )
