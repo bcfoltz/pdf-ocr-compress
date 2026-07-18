@@ -42,9 +42,8 @@ GHOSTSCRIPT_TOOL_MISSING: Final[str] = "GHOSTSCRIPT_TOOL_MISSING"
 PROCESSING_FAILED: Final[str] = "PROCESSING_FAILED"
 OUTPUT_GREW_NO_FALLBACK: Final[str] = "OUTPUT_GREW_NO_FALLBACK"
 VALIDATION_ERROR: Final[str] = "VALIDATION_ERROR"
-# Reserved — no enforcement path yet. The /api/process upload reads the full
-# file into memory before writing to disk; a future max_upload_bytes setting
-# would trigger this code. See CLAUDE.md "Open debt" for status.
+# Raised (413) by /api/process when a nonzero max_upload_bytes setting is
+# exceeded during the chunked upload copy. Factory default is 0 (unlimited).
 FILE_TOO_LARGE: Final[str] = "FILE_TOO_LARGE"
 
 

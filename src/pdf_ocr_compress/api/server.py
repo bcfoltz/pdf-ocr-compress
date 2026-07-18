@@ -20,6 +20,7 @@ from ..core.pipeline import run_pipeline
 from .errors import (
     BATCH_JOB_NOT_FOUND,
     FILE_NOT_FOUND,
+    FILE_TOO_LARGE,
     INPUT_NOT_PDF,
     INVALID_FOLDER,
     INVALID_MODE,
@@ -121,7 +122,7 @@ class ProcessResponse(BaseModel):
                 "reduction_percent": 17.28,
                 "processing_time": 12.34,
                 "ocr_ran": False,
-                "ocr_skipped_reason": "input already has text layer",
+                "ocr_skipped_reason": "input_has_text_layer",
                 "preset_actually_used": "smallest",
                 "pdfminer_text_extractable": True,
                 "pct_change": -17.28,
@@ -308,7 +309,7 @@ async def health():
     responses=_PROCESS_ERROR_RESPONSES,
     summary="Process one PDF (OCR + compression)",
 )
-async def process_pdf(
+def process_pdf(
     file: UploadFile = File(..., description="PDF file to process"),
     mode: str = Form(
         "auto",
@@ -355,6 +356,10 @@ async def process_pdf(
     if a passthrough was needed). Use the returned `file_id` with
     `GET /api/download/{file_id}` to retrieve the processed file
     within 1 hour.
+
+    Deliberately a sync `def`: FastAPI runs it in the threadpool, so a
+    long pipeline run (hours for multi-GB scans) doesn't block the event
+    loop — /health and batch polling stay responsive.
     """
     cleanup_old_files()
 
@@ -387,10 +392,30 @@ async def process_pdf(
     output_base = workdir / "output.pdf"
 
     try:
-        # Save uploaded file
+        # Save the upload in 16 MB chunks (same size as the GUI's
+        # _chunk_copy) so a multi-GB scan never lands in RAM at once.
+        # `file.file` is the underlying synchronous SpooledTemporaryFile.
+        # A nonzero max_upload_bytes setting rejects oversized uploads
+        # with the documented FILE_TOO_LARGE code; 0 means unlimited.
+        max_bytes = settings.max_upload_bytes
+        chunk_size = 16 * 1024 * 1024
+        bytes_written = 0
         with open(input_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            while chunk := file.file.read(chunk_size):
+                bytes_written += len(chunk)
+                if max_bytes and bytes_written > max_bytes:
+                    raise APIException(
+                        413,
+                        FILE_TOO_LARGE,
+                        f"Upload exceeds max_upload_bytes ({max_bytes} B)",
+                        [
+                            "Raise max_upload_bytes in settings (or set it "
+                            "to 0 for unlimited)",
+                            "Or process the file locally via the CLI, which "
+                            "reads from disk without an upload",
+                        ],
+                    )
+                f.write(chunk)
 
         # Run the unified pipeline; it builds the structured ProcessResult
         # report we surface in the response.
@@ -627,7 +652,7 @@ async def batch_status(job_id: str):
     return row
 
 
-def start_server(host: str = "0.0.0.0", port: int = 8502):
+def start_server(host: str = "127.0.0.1", port: int = 8502):
     """Start the FastAPI server."""
     import uvicorn
 

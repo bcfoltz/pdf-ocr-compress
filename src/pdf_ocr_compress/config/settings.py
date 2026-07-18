@@ -25,6 +25,9 @@ class AppSettings:
     batch_concurrency: int = 1
     oversize_policy: OversizePolicy = "fallback"
     tesseract_timeout: int = 0
+    # API upload cap in bytes; 0 = unlimited. Nonzero makes /api/process
+    # reject bigger uploads with the FILE_TOO_LARGE error code.
+    max_upload_bytes: int = 0
 
 
 def _default_config_dir() -> Path:
@@ -82,6 +85,8 @@ class ConfigManager:
             s.oversize_policy = v  # type: ignore[assignment]
         if v := os.getenv("PDF_OCR_TESSERACT_TIMEOUT"):
             s.tesseract_timeout = int(v)
+        if v := os.getenv("PDF_OCR_MAX_UPLOAD_BYTES"):
+            s.max_upload_bytes = int(v)
 
     @staticmethod
     def _settings_to_dict(s: AppSettings) -> dict[str, Any]:

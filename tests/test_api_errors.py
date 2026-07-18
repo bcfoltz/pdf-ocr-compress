@@ -197,6 +197,62 @@ def test_process_ghostscript_missing_maps_to_gs_tool_missing(
     _assert_error_shape(resp.json(), err.GHOSTSCRIPT_TOOL_MISSING)
 
 
+# --- FILE_TOO_LARGE enforcement ---------------------------------------------
+
+
+def test_process_upload_over_cap_returns_file_too_large(
+    client: TestClient, sample_pdf: Path
+) -> None:
+    """A nonzero max_upload_bytes rejects bigger uploads with 413."""
+    from pdf_ocr_compress.config import get_config
+
+    settings = get_config().settings
+    with patch.object(settings, "max_upload_bytes", 10):
+        with open(sample_pdf, "rb") as f:
+            resp = client.post(
+                "/api/process",
+                files={"file": ("a.pdf", f, "application/pdf")},
+                data={"mode": "compress", "preset": "smallest"},
+            )
+    assert resp.status_code == 413
+    _assert_error_shape(resp.json(), err.FILE_TOO_LARGE)
+
+
+def test_process_upload_under_cap_processes_normally(
+    client: TestClient, sample_pdf: Path, tmp_path: Path
+) -> None:
+    """Uploads under a nonzero cap flow through to the pipeline untouched."""
+    from pdf_ocr_compress.config import get_config
+    from pdf_ocr_compress.core.pipeline import ProcessResult
+
+    out = tmp_path / "out.pdf"
+    out.write_bytes(b"%PDF-1.4\n%out\n")
+    fake_result = ProcessResult(
+        output_path=out,
+        input_bytes=100,
+        output_bytes=80,
+        pct_change=-20.0,
+        ocr_ran=False,
+        ocr_skipped_reason="compress_only_mode",
+        processing_seconds=0.01,
+        preset_actually_used="smallest",
+        pdfminer_text_extractable=True,
+    )
+    settings = get_config().settings
+    with patch.object(settings, "max_upload_bytes", 10_000_000):
+        with patch(
+            "pdf_ocr_compress.api.server.run_pipeline", return_value=fake_result
+        ):
+            with open(sample_pdf, "rb") as f:
+                resp = client.post(
+                    "/api/process",
+                    files={"file": ("a.pdf", f, "application/pdf")},
+                    data={"mode": "compress", "preset": "smallest"},
+                )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "success"
+
+
 # --- Batch end-to-end through SQLite (Phase 4 task 3) -----------------------
 
 

@@ -456,7 +456,7 @@ Stable error codes:
 | `PROCESSING_FAILED` | 500 | Pipeline raised an unhandled exception. |
 | `OUTPUT_GREW_NO_FALLBACK` | 500 | Size-invariant guard fired with `oversize_policy=fail`. |
 | `VALIDATION_ERROR` | 422 | Request body failed pydantic validation; per-field details in `suggestions`. |
-| `FILE_TOO_LARGE` | reserved | Reserved for a future upload-size limit. Not currently emitted; consumers can wire branches against it now. |
+| `FILE_TOO_LARGE` | 413 | Upload exceeds the `max_upload_bytes` setting. Only emitted when that setting is nonzero (factory default `0` = unlimited). |
 
 ## PDF/A flag
 
@@ -487,10 +487,11 @@ archival-format file whose textual content is still image-only.
 - **Interactive docs.** `/docs` (Swagger UI) is generated from the
   same OpenAPI schema this document describes; it's the canonical
   cross-check if anything here goes out of date.
-- **No upload size limit is currently enforced.** The `/api/process`
-  endpoint reads the full upload into memory before writing to disk,
-  so very large files (multi-GB) will exhaust the API process's
-  memory before any error is returned. The `FILE_TOO_LARGE` error
-  code is reserved for a future limit; for now, prefer
-  `POST /api/batch` (server-side folder path, no upload) for files
-  larger than ~1 GB.
+- **Uploads stream to disk in 16 MB chunks.** The `/api/process`
+  endpoint no longer buffers the whole upload in memory, so multi-GB
+  uploads are safe RAM-wise (they still cost upload time; for very
+  large local files, `POST /api/batch` with a server-side folder path
+  avoids the upload entirely). An upload size limit is off by default;
+  set `max_upload_bytes` in settings (or the `PDF_OCR_MAX_UPLOAD_BYTES`
+  env var) to a nonzero byte count to reject larger uploads with
+  `FILE_TOO_LARGE` (HTTP 413).

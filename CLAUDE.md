@@ -179,9 +179,6 @@ issues.
   covered by the setting.
 - **`POST /api/batch/{job_id}/cancel`.** Deferred from Phase 4;
   jobs run to completion or until uvicorn dies.
-- **`FILE_TOO_LARGE` enforcement.** The error code is reserved and
-  documented in `docs/API.md` but no `max_upload_bytes` setting
-  exists yet to trigger it.
 
 ## Out of scope
 
