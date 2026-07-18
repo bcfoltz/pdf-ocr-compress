@@ -88,9 +88,10 @@ def enforce_oversize_policy(
             outcome["status"] = "warned"
         return output_path
 
-    logger.info(f"{msg}; retrying with smallest preset (oversize_policy=fallback)")
-
     if can_retry and retry_with_smallest is not None:
+        logger.info(
+            f"{msg}; retrying with smallest preset (oversize_policy=fallback)"
+        )
         try:
             output_path.unlink()
         except OSError:
@@ -106,6 +107,12 @@ def enforce_oversize_policy(
             retry_path.unlink()
         except OSError:
             pass
+    else:
+        # Already at smallest (or no retry closure): no retry to attempt.
+        logger.info(
+            f"{msg}; no smaller preset to retry; passing through input "
+            "unchanged (oversize_policy=fallback)"
+        )
 
     shutil.copy2(input_path, output_path)
     logger.info(f"Wrote passthrough copy ({in_size} B) to {output_path.name}")

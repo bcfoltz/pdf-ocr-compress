@@ -157,6 +157,45 @@ def test_outcome_passthrough(tmp_path):
     assert outcome["status"] == "passthrough"
 
 
+# --- Log messages match what actually happened (F-022) -----------------------
+
+
+def test_no_retry_path_does_not_log_retrying(tmp_path, caplog):
+    """can_retry=False goes straight to passthrough — the audit trail must
+    not claim a retry that never happens (fable_review F-022).
+    """
+    import logging
+
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 1500)
+
+    with caplog.at_level(logging.INFO, logger="pdf_ocr_compress.oversize"):
+        enforce_oversize_policy(inp, out, "fallback", can_retry=False)
+
+    messages = " | ".join(r.getMessage() for r in caplog.records)
+    assert "retrying with smallest" not in messages
+    assert "passing through input unchanged" in messages
+
+
+def test_retry_path_logs_retrying(tmp_path, caplog):
+    """can_retry=True with a retry closure does log the retry attempt."""
+    import logging
+
+    inp = _write(tmp_path / "in.pdf", 1000)
+    out = _write(tmp_path / "out.pdf", 1500)
+
+    def retry_smallest():
+        return _write(tmp_path / "out.pdf", 600)
+
+    with caplog.at_level(logging.INFO, logger="pdf_ocr_compress.oversize"):
+        enforce_oversize_policy(
+            inp, out, "fallback", can_retry=True, retry_with_smallest=retry_smallest
+        )
+
+    messages = " | ".join(r.getMessage() for r in caplog.records)
+    assert "retrying with smallest" in messages
+
+
 # --- Wiring tests: compress() actually plumbs the guard through ----------------
 
 
