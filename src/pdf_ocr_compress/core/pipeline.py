@@ -39,6 +39,12 @@ class ProcessResult:
     processing_seconds: float
     preset_actually_used: str
     pdfminer_text_extractable: bool
+    # Sampled text coverage of the output (P-002): up to 10 pages spread
+    # across the document. Defaulted so pre-existing constructions stay
+    # valid; pdfminer_text_extractable is derived (pages_with_text > 0).
+    text_pages_sampled: int = 0
+    text_pages_with_text: int = 0
+    text_words: int = 0
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -138,6 +144,8 @@ def run_pipeline(
     output_bytes = produced.stat().st_size
     pct_change = 100.0 * (output_bytes - input_bytes) / max(input_bytes, 1)
 
+    pages_sampled, pages_with_text, words = _text_coverage(produced)
+
     return ProcessResult(
         output_path=produced,
         input_bytes=input_bytes,
@@ -147,22 +155,51 @@ def run_pipeline(
         ocr_skipped_reason=ocr_skipped_reason,
         processing_seconds=elapsed,
         preset_actually_used=op_result.get("preset_used", preset),
-        pdfminer_text_extractable=_pdfminer_text_extractable(produced),
+        pdfminer_text_extractable=pages_with_text > 0,
+        text_pages_sampled=pages_sampled,
+        text_pages_with_text=pages_with_text,
+        text_words=words,
     )
 
 
-def _pdfminer_text_extractable(pdf_path: Path) -> bool:
-    """Smoke check: does pdfminer extract any text from the first 2 pages?
+def _text_coverage(pdf_path: Path, max_sample_pages: int = 10) -> tuple[int, int, int]:
+    """Sampled page-level text coverage: (pages_sampled, pages_with_text, words).
 
-    Used as a post-hoc fidelity signal in ProcessResult. False on any
-    pdfminer exception (corrupt/encrypted/parser-strict failure) — the
-    point is to confirm a downstream RAG ingestion would see text, not
-    to diagnose extraction problems.
+    Replaces the old first-2-pages boolean probe (which passed a book
+    whose text layer died on page 3). Samples up to `max_sample_pages`
+    pages spread evenly across the document — always including the first
+    and last — and counts whitespace-delimited words on them. The point
+    is to tell a downstream RAG ingestion how much of the document it
+    will actually see, not to diagnose extraction problems. Returns
+    (0, 0, 0) on any failure (corrupt/encrypted/parser-strict), matching
+    the old probe's failure envelope.
     """
     try:
+        import pikepdf
         from pdfminer.high_level import extract_text
 
-        text = extract_text(str(pdf_path), maxpages=2) or ""
+        with pikepdf.open(str(pdf_path)) as pdf:
+            n_pages = len(pdf.pages)
+        if n_pages <= 0:
+            return (0, 0, 0)
+        if n_pages <= max_sample_pages:
+            sample = list(range(n_pages))
+        else:
+            step = (n_pages - 1) / (max_sample_pages - 1)
+            sample = sorted({round(i * step) for i in range(max_sample_pages)})
+
+        # extract_text per page (one parse pass each, capped at
+        # max_sample_pages) rather than one extract_pages sweep:
+        # OCRmyPDF's invisible text layer lives inside Form XObjects,
+        # which layout analysis wraps in LTFigure — text-container
+        # iteration misses it, while the TextConverter path sees it.
+        pages_with_text = 0
+        words = 0
+        for idx in sample:
+            text = extract_text(str(pdf_path), page_numbers={idx}) or ""
+            if text.strip():
+                pages_with_text += 1
+            words += len(text.split())
+        return (len(sample), pages_with_text, words)
     except Exception:
-        return False
-    return bool(text.strip())
+        return (0, 0, 0)

@@ -608,10 +608,23 @@ def main():
         )
         if single["out_source"] in ("override", "setting"):
             st.caption(f"📂 Saved to: `{rep['output_path']}`")
+        sampled = rep.get("text_pages_sampled", 0)
+        with_text = rep.get("text_pages_with_text", 0)
+        if sampled:
+            st.caption(
+                f"🔎 Text found on {with_text}/{sampled} sampled pages "
+                f"({rep.get('text_words', 0)} words seen)"
+            )
         if not rep["pdfminer_text_extractable"]:
             st.warning(
                 "pdfminer could not extract text from the output — RAG ingestion "
                 "may treat this PDF as image-only."
+            )
+        elif sampled and with_text < sampled:
+            st.warning(
+                f"Partial text coverage: only {with_text} of {sampled} sampled "
+                "pages have extractable text — some pages may be image-only "
+                "for RAG ingestion."
             )
         with st.expander("Full report"):
             st.json(rep)

@@ -51,7 +51,9 @@ def stub_pipeline_internals(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_pipeline, "_compress", fake_compress)
     monkeypatch.setattr(_pipeline, "_run_ocr", fake_run_ocr)
-    monkeypatch.setattr(_pipeline, "_pdfminer_text_extractable", lambda _p: True)
+    # (pages_sampled, pages_with_text, words) — pdfminer_text_extractable
+    # is derived from pages_with_text > 0.
+    monkeypatch.setattr(_pipeline, "_text_coverage", lambda _p: (2, 2, 40))
     return calls
 
 

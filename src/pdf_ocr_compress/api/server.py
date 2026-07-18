@@ -132,6 +132,9 @@ class ProcessResponse(BaseModel):
                 "preset_actually_used": "smallest",
                 "pdfminer_text_extractable": True,
                 "pct_change": -17.28,
+                "text_pages_sampled": 10,
+                "text_pages_with_text": 10,
+                "text_words": 3140,
             }
         }
     )
@@ -152,6 +155,12 @@ class ProcessResponse(BaseModel):
     preset_actually_used: str  # may differ from `preset` if oversize fallback fired
     pdfminer_text_extractable: bool
     pct_change: float  # negative = output shrunk; positive = output grew
+
+    # Sampled text coverage (P-002): up to 10 pages spread across the
+    # output. pdfminer_text_extractable is derived (pages_with_text > 0).
+    text_pages_sampled: int
+    text_pages_with_text: int
+    text_words: int
 
 
 class BatchRequest(BaseModel):
@@ -469,6 +478,9 @@ def process_pdf(
             preset_actually_used=result.preset_actually_used,
             pdfminer_text_extractable=result.pdfminer_text_extractable,
             pct_change=round(result.pct_change, 2),
+            text_pages_sampled=result.text_pages_sampled,
+            text_pages_with_text=result.text_pages_with_text,
+            text_words=result.text_words,
         )
 
     except APIException:

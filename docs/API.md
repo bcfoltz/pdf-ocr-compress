@@ -351,8 +351,11 @@ Returned by `POST /api/process`. Every field is always present.
 | `ocr_ran` | bool | Whether OCR was executed. |
 | `ocr_skipped_reason` | string \| null | Reason OCR was skipped. `null` when OCR ran. Short snake_case tokens; current values are `"input_has_text_layer"` (auto-routing detected an existing text layer) and `"compress_only_mode"` (caller passed `mode=compress`). |
 | `preset_actually_used` | string | The preset that produced the output file. May differ from `preset` if the requested preset would have grown the file (oversize fallback ladder: requested → `smallest` → passthrough). |
-| `pdfminer_text_extractable` | bool | Post-hoc fidelity check: pdfminer was able to extract text from the output. A `false` value when `ocr_ran` is `true` indicates a serious problem (OCR ran but produced no extractable text layer). |
+| `pdfminer_text_extractable` | bool | Post-hoc fidelity check, derived from the coverage fields below (`text_pages_with_text > 0`). A `false` value when `ocr_ran` is `true` indicates a serious problem (OCR ran but produced no extractable text layer). |
 | `pct_change` | float | Negative when output shrunk; positive when output grew. |
+| `text_pages_sampled` | int | Pages probed for extractable text: up to 10, spread evenly across the output (always including first and last). `0` when the output could not be parsed. |
+| `text_pages_with_text` | int | Sampled pages with any extractable text. A value below `text_pages_sampled` means partial coverage — some pages are image-only to a RAG ingestion pipeline. |
+| `text_words` | int | Whitespace-delimited words extracted across the sampled pages. A per-file gating signal for downstream ingestion. |
 
 The `original_size` / `output_size` / `reduction_percent` /
 `processing_time` block is kept for back-compat with consumers that
@@ -401,8 +404,11 @@ ProcessResult  (the per-file report inside BatchResult.process_result)
   ocr_ran                    : bool
   ocr_skipped_reason         : string | null
   preset_actually_used       : string
-  pdfminer_text_extractable  : bool
+  pdfminer_text_extractable  : bool  (derived: text_pages_with_text > 0)
   processing_seconds         : float
+  text_pages_sampled         : int   (sampled text coverage — see the
+  text_pages_with_text       : int    ProcessResponse field table)
+  text_words                 : int
 ```
 
 `results` is in the same order as the input folder's `*.pdf` glob
