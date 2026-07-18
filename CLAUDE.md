@@ -43,7 +43,7 @@ That installs from `pyproject.toml` + `uv.lock` into `.venv/`. Tesseract and Gho
 ### Common dev commands
 
 ```bash
-# CLI — four subcommands: ocr | compress | process | batch
+# CLI — five subcommands: ocr | compress | process | batch | config
 uv run pdf-ocr --help
 uv run pdf-ocr process input.pdf output.pdf
 uv run pdf-ocr ocr document.pdf out.pdf --lang eng
@@ -92,7 +92,7 @@ src/pdf_ocr_compress/
 │   ├── compress.py      # Ghostscript + pikepdf compression; applies oversize guard
 │   ├── detect.py        # pikepdf-based "does this PDF need OCR?" heuristic
 │   └── oversize.py      # enforce_oversize_policy — the size-invariant guard
-├── cli.py               # Typer CLI — commands: ocr, compress, process, batch (all -> run_pipeline)
+├── cli.py               # Typer CLI — commands: ocr, compress, process, batch, config (processing -> run_pipeline)
 ├── gui/
 │   ├── __init__.py      # main_gui() launcher (used by `pdf-ocr-gui` script)
 │   └── basic.py         # The Streamlit app — THE ONLY GUI (calls run_pipeline)

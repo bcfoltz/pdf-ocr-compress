@@ -1,10 +1,13 @@
 """CLI interface for PDF OCR + Compression Tool."""
 
+import os
+from dataclasses import fields as dc_fields
 from pathlib import Path
 
 import typer
 
 from .config import get_config
+from .config.settings import AppSettings, ConfigManager
 from .core.batch import run_batch
 from .core.pipeline import run_pipeline
 from .utils.errors import PDFProcessingError
@@ -14,6 +17,12 @@ app = typer.Typer(
     no_args_is_help=True,
     help="OCR + compress SCANNED PDFs (cross-platform) — Designed for scanned documents, not native digital PDFs",
 )
+
+config_app = typer.Typer(
+    no_args_is_help=True,
+    help="View or change the persisted defaults (settings.json).",
+)
+app.add_typer(config_app, name="config")
 
 
 @app.command()
@@ -163,6 +172,69 @@ def batch(
     typer.echo("")
     typer.echo(f"Batch summary: {report.one_line_summary()}")
     typer.echo(f"Report: {effective_output_dir / 'batch_report.json'}")
+
+
+# Settings whose values are restricted to a fixed choice set.
+_CONFIG_CHOICES = {
+    "default_preset": ("archival", "balanced", "smallest"),
+    "oversize_policy": ("fallback", "warn", "fail"),
+}
+
+
+def _env_var_for(field_name: str) -> str:
+    """PDF_OCR_* env var for a settings field (apply_env_overrides convention)."""
+    return f"PDF_OCR_{field_name.upper()}"
+
+
+@config_app.command("show")
+def config_show():
+    """Print persisted settings, the file location, and env overrides in effect."""
+    # Fresh manager: file-backed values only. get_config() would show
+    # env-overridden values without saying so.
+    manager = ConfigManager()
+    s = manager.settings
+    typer.echo(f"Settings file: {manager.config_file}")
+    for f in dc_fields(AppSettings):
+        typer.echo(f"  {f.name} = {getattr(s, f.name)}")
+    overrides = [
+        (env, val)
+        for f in dc_fields(AppSettings)
+        if (val := os.getenv(env := _env_var_for(f.name)))
+    ]
+    if overrides:
+        typer.echo("Environment overrides in effect (per-session, not persisted):")
+        for env, val in overrides:
+            typer.echo(f"  {env} = {val}")
+
+
+@config_app.command("set")
+def config_set(key: str, value: str):
+    """Set one setting and persist it (e.g. `pdf-ocr config set default_preset smallest`)."""
+    valid = {f.name: f for f in dc_fields(AppSettings)}
+    if key not in valid:
+        typer.echo(f"Unknown setting {key!r}. Valid keys: {', '.join(valid)}", err=True)
+        raise typer.Exit(code=2)
+    if key in _CONFIG_CHOICES and value not in _CONFIG_CHOICES[key]:
+        typer.echo(f"{key} must be one of: {', '.join(_CONFIG_CHOICES[key])}", err=True)
+        raise typer.Exit(code=2)
+
+    coerced: object = value
+    if valid[key].type is int:
+        try:
+            coerced = int(value)
+        except ValueError:
+            typer.echo(f"{key} must be an integer, got {value!r}", err=True)
+            raise typer.Exit(code=2) from None
+    elif key == "default_output_dir":
+        coerced = Path(value).expanduser() if value.strip() else None
+
+    # Fresh manager so PDF_OCR_* env overrides (applied to the get_config()
+    # singleton) are never baked into the persisted file.
+    manager = ConfigManager()
+    settings = manager.settings
+    setattr(settings, key, coerced)
+    manager.save_settings(settings)
+    typer.echo(f"{key} = {coerced} (saved to {manager.config_file})")
 
 
 def main():

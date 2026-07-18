@@ -75,8 +75,10 @@ codes, and curl + Python examples.
 
 ### Command line
 
-The CLI has four subcommands: `process` (auto-route to OCR or
-compress), `ocr`, `compress`, and `batch`.
+The CLI has five subcommands: `process` (auto-route to OCR or
+compress), `ocr`, `compress`, `batch`, and `config` (view or change
+the persisted defaults: `pdf-ocr config show`, `pdf-ocr config set
+default_preset smallest`).
 
 ```bash
 # Single file — auto-routes to OCR or compress
