@@ -7,6 +7,7 @@ import typer
 from .config import get_config
 from .core.batch import run_batch
 from .core.pipeline import run_pipeline
+from .utils.errors import PDFProcessingError
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -18,10 +19,12 @@ app = typer.Typer(
 def ocr(
     input_pdf: Path,
     output_pdf: Path,
-    lang: str = "eng",
-    preset: str = typer.Option("balanced", help="archival | balanced | smallest"),
+    lang: str = typer.Option(None, help="OCR language(s). Default from settings."),
+    preset: str = typer.Option(
+        None, help="archival | balanced | smallest. Default from settings."
+    ),
     pdfa: bool = False,
-    jobs: int = 1,
+    jobs: int = typer.Option(None, help="OCR parallelism. Default from settings."),
     force_ocr: bool = False,
 ):
     """Add a searchable text layer to scanned pages; writes a brand-new file."""
@@ -42,7 +45,9 @@ def ocr(
 def compress(
     input_pdf: Path,
     output_pdf: Path,
-    preset: str = typer.Option("balanced", help="archival | balanced | smallest"),
+    preset: str = typer.Option(
+        None, help="archival | balanced | smallest. Default from settings."
+    ),
 ):
     """Compress & linearize; writes a brand-new file."""
     result = run_pipeline(input_pdf, output_pdf, mode="compress", preset=preset)
@@ -53,10 +58,12 @@ def compress(
 def process(
     input_pdf: Path,
     output_pdf: Path,
-    lang: str = "eng",
-    preset: str = typer.Option("balanced", help="archival | balanced | smallest"),
+    lang: str = typer.Option(None, help="OCR language(s). Default from settings."),
+    preset: str = typer.Option(
+        None, help="archival | balanced | smallest. Default from settings."
+    ),
     pdfa: bool = False,
-    jobs: int = 1,
+    jobs: int = typer.Option(None, help="OCR parallelism. Default from settings."),
     force_ocr: bool = False,
 ):
     """
@@ -145,8 +152,23 @@ def batch(
 
 
 def main():
-    """Entry point for the CLI application."""
-    app()
+    """Entry point for the CLI application.
+
+    Domain errors (missing system tools, corrupt PDFs, oversize-policy
+    failures) render their user_message + suggestions instead of a
+    traceback; anything unexpected still tracebacks for bug reports.
+    """
+    try:
+        app()
+    except PDFProcessingError as exc:
+        typer.echo(exc.user_message, err=True)
+        for suggestion in exc.suggestions:
+            typer.echo(f"- {suggestion}", err=True)
+        if exc.error_code:
+            typer.echo(f"Error code: {exc.error_code}", err=True)
+        # typer.Exit only works inside app(); out here SystemExit is the
+        # clean way to set the exit code without a traceback.
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

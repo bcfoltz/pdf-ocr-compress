@@ -318,25 +318,33 @@ async def process_pdf(
             "OCR. One of: auto | ocr | compress."
         ),
     ),
-    preset: str = Form(
-        "balanced",
+    preset: str | None = Form(
+        None,
         description=(
             "Compression preset. `smallest` is recommended for ScanSnap "
             "scans of any size and is enforced as the oversize-fallback "
-            "target. One of: archival | balanced | smallest."
+            "target. One of: archival | balanced | smallest. Default from "
+            "settings (factory default: smallest)."
         ),
     ),
-    language: str = Form(
-        "eng",
-        description="Tesseract language codes joined by `+` (e.g. `eng`, `eng+spa`).",
+    language: str | None = Form(
+        None,
+        description=(
+            "Tesseract language codes joined by `+` (e.g. `eng`, `eng+spa`). "
+            "Default from settings (factory default: eng)."
+        ),
     ),
     pdfa: bool = Form(False, description="Produce PDF/A-2 compliant output"),
     force_ocr: bool = Form(
         False,
         description="Force OCR even if a text layer is already present.",
     ),
-    jobs: int = Form(
-        4, description="Number of parallel OCR workers (passed to OCRmyPDF)."
+    jobs: int | None = Form(
+        None,
+        description=(
+            "Number of parallel OCR workers (passed to OCRmyPDF). "
+            "Default from settings (factory default: 4)."
+        ),
     ),
 ):
     """Process one PDF with OCR + compression and return a file_id.
@@ -349,6 +357,16 @@ async def process_pdf(
     within 1 hour.
     """
     cleanup_old_files()
+
+    # Resolve settings-driven defaults (mirrors start_batch) so the
+    # documented default preset (`smallest`) actually applies here too.
+    settings = get_config().settings
+    if preset is None:
+        preset = settings.default_preset
+    if language is None:
+        language = settings.default_language
+    if jobs is None:
+        jobs = settings.default_jobs
 
     # Validate inputs
     if mode not in ["auto", "ocr", "compress"]:

@@ -43,7 +43,7 @@ That installs from `pyproject.toml` + `uv.lock` into `.venv/`. Tesseract and Gho
 ### Common dev commands
 
 ```bash
-# CLI — three subcommands: ocr | compress | process
+# CLI — four subcommands: ocr | compress | process | batch
 uv run pdf-ocr --help
 uv run pdf-ocr process input.pdf output.pdf
 uv run pdf-ocr ocr document.pdf out.pdf --lang eng
@@ -92,7 +92,7 @@ src/pdf_ocr_compress/
 │   ├── compress.py      # Ghostscript + pikepdf compression; applies oversize guard
 │   ├── detect.py        # pikepdf-based "does this PDF need OCR?" heuristic
 │   └── oversize.py      # enforce_oversize_policy — the size-invariant guard
-├── cli.py               # Typer CLI — commands: ocr, compress, process (all -> run_pipeline)
+├── cli.py               # Typer CLI — commands: ocr, compress, process, batch (all -> run_pipeline)
 ├── gui/
 │   ├── __init__.py      # main_gui() launcher (used by `pdf-ocr-gui` script)
 │   └── basic.py         # The Streamlit app — THE ONLY GUI (calls run_pipeline)
@@ -171,12 +171,6 @@ issues.
   Single-file uploads (`pdfgui_in_*`) and upload-mode batches
   (`pdfgui_batch_*`) leak on failure. For 5 GB scans that's
   gigabytes per failed run. Fix: try/finally around the run blocks.
-- **CLI surface defaults still hardcoded.** The `pdf-ocr ocr` /
-  `pdf-ocr compress` / `pdf-ocr process` Typer commands and the
-  legacy `/api/process` upload form still hardcode preset
-  (`balanced` for the API form) and other per-flag defaults. The
-  GUI and `pdf-ocr batch` already read from `get_config().settings`.
-  Cheap cleanup whenever someone touches those entry points.
 - **Recursion into batch input subfolders.** `core/batch.py:_list_pdfs`
   is non-recursive; CLI/API/GUI all inherit that. Multi-surface
   change.

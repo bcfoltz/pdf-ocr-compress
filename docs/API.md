@@ -95,11 +95,11 @@ Form parameters:
 |---|---|---|---|
 | `file` | file (multipart) | required | PDF to process. Filename must end in `.pdf`. |
 | `mode` | string | `auto` | `auto` runs OCR only when needed; `ocr` always runs OCR; `compress` skips OCR. |
-| `preset` | string | `balanced` | One of `archival`, `balanced`, `smallest`. **Recommended:** `smallest` for ScanSnap-family scanner output (the only preset that consistently shrinks; the size-invariant guard will fall back to `smallest` automatically if another preset would grow the file). |
-| `language` | string | `eng` | Tesseract language codes joined by `+` (e.g. `eng`, `eng+spa`). |
+| `preset` | string | settings default (factory: `smallest`) | One of `archival`, `balanced`, `smallest`. **Recommended:** `smallest` for ScanSnap-family scanner output (the only preset that consistently shrinks; the size-invariant guard will fall back to `smallest` automatically if another preset would grow the file). |
+| `language` | string | settings default (factory: `eng`) | Tesseract language codes joined by `+` (e.g. `eng`, `eng+spa`). |
 | `pdfa` | bool | `false` | Produce PDF/A-2 output. See "PDF/A flag" below. |
 | `force_ocr` | bool | `false` | Force OCR even if a text layer is already present. |
-| `jobs` | int | `4` | Number of parallel OCR workers passed to OCRmyPDF. |
+| `jobs` | int | settings default (factory: `4`) | Number of parallel OCR workers passed to OCRmyPDF. |
 
 curl example:
 
@@ -166,7 +166,7 @@ Status codes:
 
 Queue a folder-batch job. The folder must exist on the server's
 filesystem; there is no upload mode for batch (it is designed for
-folders mounted into the container or local to the API process).
+folders local to the machine running the API).
 Returns immediately with a `job_id`; processing runs in the
 background.
 
