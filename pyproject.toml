@@ -69,8 +69,11 @@ line-length = 88
 target-version = "py310"
 
 [tool.ruff.lint]
-# pycodestyle (E/W), pyflakes (F), isort (I), pyupgrade (UP), bugbear (B)
-select = ["E", "F", "W", "I", "UP", "B"]
+# pycodestyle (E/W), pyflakes (F), isort (I), pyupgrade (UP), bugbear (B),
+# plus DTZ003/DTZ004: ban datetime.utcnow()/utcfromtimestamp() (deprecated
+# on 3.12+; recurrence guard for fable_review F-018). Bare datetime.now()
+# stays allowed — local-time stamps in filenames/reports are intentional.
+select = ["E", "F", "W", "I", "UP", "B", "DTZ003", "DTZ004"]
 ignore = ["E501"]  # line length is black's job
 
 [tool.ruff.lint.per-file-ignores]
