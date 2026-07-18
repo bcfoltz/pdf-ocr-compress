@@ -504,3 +504,100 @@ def test_run_batch_real_binaries_mixed_outcomes(text_pdf, corrupt_pdf, tmp_path)
     assert failed.attempts == 3
     assert failed.error_msg is not None
     assert failed.output_path is None
+
+
+# --- Incremental batch: skip already-processed inputs (proposal P-001) --------
+
+
+def test_run_batch_skips_inputs_with_existing_outputs(monkeypatch, tmp_path):
+    """An input whose same-name output already exists is skipped: no
+    pipeline call, status='skipped', attempts=0, output_path points at
+    the existing file.
+    """
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    _make_pdf(in_dir / "done.pdf")
+    _make_pdf(out_dir / "done.pdf", b"%PDF-1.4 prior output\n")
+
+    fake, calls = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir)
+
+    assert calls == []
+    assert report.total_files == 1
+    assert report.skipped == 1
+    assert report.succeeded == 0
+    assert report.failed == 0
+    r = report.results[0]
+    assert r.status == "skipped"
+    assert r.attempts == 0
+    assert r.output_path == out_dir / "done.pdf"
+    assert r.error_msg is None
+
+
+def test_run_batch_force_reprocesses_existing_outputs(monkeypatch, tmp_path):
+    """force=True processes every input even when outputs exist."""
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    _make_pdf(in_dir / "done.pdf")
+    _make_pdf(out_dir / "done.pdf", b"%PDF-1.4 prior output\n")
+
+    fake, calls = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir, force=True)
+
+    assert calls == [in_dir / "done.pdf"]
+    assert report.skipped == 0
+    assert report.succeeded == 1
+
+
+def test_run_batch_mixed_new_and_done(monkeypatch, tmp_path):
+    """New files are processed while already-done files are skipped;
+    report counts and byte totals cover only the processed files.
+    """
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    _make_pdf(in_dir / "old.pdf", b"%PDF-1.4 old input bytes\n")
+    _make_pdf(in_dir / "new.pdf", b"%PDF-1.4 new input bytes!!\n")
+    _make_pdf(out_dir / "old.pdf", b"%PDF-1.4 prior output\n")
+
+    fake, calls = _fake_pipeline_factory(tmp_path)
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    progress: list[tuple[int, int]] = []
+    report = batch_mod.run_batch(
+        in_dir,
+        out_dir,
+        progress_callback=lambda cur, total, path: progress.append((cur, total)),
+    )
+
+    assert calls == [in_dir / "new.pdf"]
+    assert report.total_files == 2
+    assert report.skipped == 1
+    assert report.succeeded == 1
+    assert report.failed == 0
+    # Byte totals cover processed files only — skipped inputs would
+    # distort the size-delta summary.
+    assert report.total_input_bytes == (in_dir / "new.pdf").stat().st_size
+    # Progress reflects only the files actually worked.
+    assert progress == [(1, 1)]
+    # Results still follow folder order.
+    assert [r.input_path.name for r in report.results] == ["new.pdf", "old.pdf"]
+    # Summary mentions the skip.
+    assert "1 skipped" in report.one_line_summary()
+    # Report JSON carries the additive field.
+    assert report.to_dict()["skipped"] == 1

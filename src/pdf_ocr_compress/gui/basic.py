@@ -682,6 +682,18 @@ def main():
         ),
     )
 
+    batch_force = st.checkbox(
+        "Reprocess existing outputs",
+        value=False,
+        key="batch_force",
+        help=(
+            "Batches are incremental by default: inputs whose same-name "
+            "output already exists in the output folder are skipped. Tick "
+            "to reprocess everything. (Only relevant when outputs go to a "
+            "stable folder, e.g. local-folder mode.)"
+        ),
+    )
+
     batch_uploads = None
     batch_input_folder_str = ""
     batch_output_folder_str = ""
@@ -837,6 +849,7 @@ def main():
                     jobs=jobs,
                     pdfa=pdfa,
                     force_ocr=force_ocr,
+                    force=batch_force,
                     progress_callback=_cb,
                 )
                 progress_bar.progress(1.0, text="Done")
@@ -867,6 +880,16 @@ def main():
                         "status": "ok",
                         "delta": f"{sign}{abs(pct):.1f}%",
                         "attempts": r.attempts,
+                        "error": "",
+                    }
+                )
+            elif r.status == "skipped":
+                final_rows.append(
+                    {
+                        "file": r.input_path.name,
+                        "status": "skipped (output exists)",
+                        "delta": "—",
+                        "attempts": 0,
                         "error": "",
                     }
                 )

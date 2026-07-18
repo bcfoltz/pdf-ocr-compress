@@ -182,6 +182,7 @@ JSON body:
 | `jobs` | int | settings default | Same semantics as `/api/process`. |
 | `pdfa` | bool | `false` | Same semantics as `/api/process`. |
 | `force_ocr` | bool | `false` | Same semantics as `/api/process`. |
+| `force` | bool | `false` | Reprocess inputs whose same-name output already exists in `output_dir`. Batches are incremental by default: such inputs are skipped (`status: "skipped"` in the report), so re-running over a growing folder only processes new files. The check is existence-only — a rescanned input with an unchanged filename counts as done until `force` is used. |
 
 curl example:
 
@@ -373,21 +374,23 @@ BatchReport
   total_files        : int
   succeeded          : int
   failed             : int
+  skipped            : int  (inputs skipped because their output already existed)
   started_at         : string  (ISO-8601, millisecond precision)
   finished_at        : string  (ISO-8601, millisecond precision)
   total_seconds      : float
-  total_input_bytes  : int
+  total_input_bytes  : int  (processed files only; skipped excluded)
   total_output_bytes : int  (successful files only)
   results            : [ BatchResult, ... ]
 
 BatchResult
   input_path     : string  (absolute path)
-  output_path    : string | null  (absolute path; null if file failed)
-  status         : "ok" | "failed"
-  attempts       : 1 | 2 | 3   (see "Failure ladder" below)
+  output_path    : string | null  (absolute path; null if file failed;
+                   for skipped files, the pre-existing output)
+  status         : "ok" | "failed" | "skipped"
+  attempts       : 0 | 1 | 2 | 3   (0 = skipped; see "Failure ladder" below)
   error_msg      : string | null
   process_result : ProcessResult | null
-                   (full per-file report for successes; null for failures)
+                   (full per-file report for successes; null otherwise)
 
 ProcessResult  (the per-file report inside BatchResult.process_result)
   input_path                 : string

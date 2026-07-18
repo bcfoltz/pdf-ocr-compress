@@ -111,11 +111,19 @@ def batch(
     force_ocr: bool = typer.Option(
         False, "--force-ocr", help="Force OCR on every file regardless of needs_ocr()."
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Reprocess inputs whose outputs already exist (default: skip them).",
+    ),
 ):
     """Process every *.pdf in INPUT_DIR; write results + batch_report.json to --output-dir.
 
-    Failures are retried once immediately and once at end of batch (max 3 attempts
-    per file). One bad PDF doesn't kill the rest of the batch.
+    Incremental by default: inputs whose same-name output already exists in
+    the output dir are skipped, so re-runs over a growing folder only touch
+    new files (--force reprocesses everything). Failures are retried once
+    immediately and once at end of batch (max 3 attempts per file). One bad
+    PDF doesn't kill the rest of the batch.
     """
     settings = get_config().settings
     effective_preset = preset if preset is not None else settings.default_preset
@@ -135,12 +143,17 @@ def batch(
         jobs=effective_jobs,
         pdfa=pdfa,
         force_ocr=force_ocr,
+        force=force,
     )
 
     # Per-file lines
     for r in report.results:
         if r.status == "ok" and r.process_result is not None:
             typer.echo(r.process_result.one_line_summary())
+        elif r.status == "skipped":
+            typer.echo(
+                f"{r.input_path.name}: skipped (output exists; use --force to redo)"
+            )
         else:
             typer.echo(
                 f"{r.input_path.name}: FAILED after {r.attempts} attempts: {r.error_msg}"

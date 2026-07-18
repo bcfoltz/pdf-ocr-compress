@@ -19,7 +19,7 @@ from ..utils.file_utils import human_readable_size
 from .pipeline import Mode, ProcessResult, run_pipeline
 
 BatchStatus = Literal["queued", "running", "done", "error"]
-FileStatus = Literal["ok", "failed"]
+FileStatus = Literal["ok", "failed", "skipped"]
 
 ProgressCallback = Callable[[int, int, Path], None]
 
@@ -31,7 +31,7 @@ class BatchResult:
     input_path: Path
     output_path: Path | None
     status: FileStatus
-    attempts: int  # total run_pipeline calls for this file (1, 2, or 3)
+    attempts: int  # run_pipeline calls for this file (1-3; 0 when skipped)
     error_msg: str | None
     process_result: ProcessResult | None
 
@@ -60,9 +60,13 @@ class BatchReport:
     started_at: str  # ISO-8601, millisecond precision
     finished_at: str
     total_seconds: float
-    total_input_bytes: int
+    total_input_bytes: int  # processed files only (skipped excluded)
     total_output_bytes: int  # successful files only
     results: list[BatchResult]
+    # Inputs skipped because a same-name output already existed
+    # (incremental batch; run with force=True to reprocess). Defaulted so
+    # pre-existing constructions stay valid.
+    skipped: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +75,7 @@ class BatchReport:
             "total_files": self.total_files,
             "succeeded": self.succeeded,
             "failed": self.failed,
+            "skipped": self.skipped,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "total_seconds": self.total_seconds,
@@ -107,8 +112,9 @@ class BatchReport:
         else:
             duration = f"{s}s"
 
+        skipped_part = f", {self.skipped} skipped" if self.skipped else ""
         return (
-            f"{self.succeeded} ok, {self.failed} failed | "
+            f"{self.succeeded} ok, {self.failed} failed{skipped_part} | "
             f"{in_size} -> {out_size} ({delta}) | {duration}"
         )
 
@@ -159,9 +165,17 @@ def run_batch(
     jobs: int | None = None,
     pdfa: bool = False,
     force_ocr: bool = False,
+    force: bool = False,
     progress_callback: ProgressCallback | None = None,
 ) -> BatchReport:
     """Process every *.pdf in input_dir and return a BatchReport.
+
+    Incremental by default: an input whose same-name output already
+    exists in output_dir is skipped (status='skipped', attempts=0), so
+    re-running over a growing folder only processes new files. Pass
+    force=True to reprocess everything. Limitation: the check is
+    existence-only — a rescanned input with an unchanged name is
+    considered done until force is used.
 
     Failure ladder per file:
       1. initial attempt
@@ -174,7 +188,26 @@ def run_batch(
     pdfs = _list_pdfs(input_dir)
     started_at = _now_iso()
     start_t = time.time()
-    total_input_bytes = sum(p.stat().st_size for p in pdfs)
+
+    skipped_results: dict[Path, BatchResult] = {}
+    to_process: list[Path] = []
+    for pdf in pdfs:
+        existing = output_dir / pdf.name
+        if not force and existing.exists():
+            skipped_results[pdf] = BatchResult(
+                input_path=pdf,
+                output_path=existing,
+                status="skipped",
+                attempts=0,
+                error_msg=None,
+                process_result=None,
+            )
+        else:
+            to_process.append(pdf)
+
+    # Byte totals cover processed files only — counting skipped inputs
+    # with no matching output bytes would distort the size-delta summary.
+    total_input_bytes = sum(p.stat().st_size for p in to_process)
 
     # Per-file outcomes after initial + immediate retry; the second-pass
     # retry runs after the main loop. `pending_retry` is keyed by input
@@ -182,9 +215,9 @@ def run_batch(
     successes: dict[Path, BatchResult] = {}
     pending_retry: dict[Path, tuple[int, Exception]] = {}
 
-    for i, pdf in enumerate(pdfs, start=1):
+    for i, pdf in enumerate(to_process, start=1):
         if progress_callback:
-            progress_callback(i, len(pdfs), pdf)
+            progress_callback(i, len(to_process), pdf)
 
         # Initial attempt
         result, error = _attempt_once(
@@ -271,6 +304,8 @@ def run_batch(
     for pdf in pdfs:
         if pdf in successes:
             results.append(successes[pdf])
+        elif pdf in skipped_results:
+            results.append(skipped_results[pdf])
         else:
             results.append(final_failures[pdf])
 
@@ -278,7 +313,8 @@ def run_batch(
     elapsed = time.time() - start_t
 
     succeeded = sum(1 for r in results if r.status == "ok")
-    failed = len(results) - succeeded
+    skipped = len(skipped_results)
+    failed = len(results) - succeeded - skipped
     total_output_bytes = sum(
         r.process_result.output_bytes for r in results if r.process_result
     )
@@ -295,6 +331,7 @@ def run_batch(
         total_input_bytes=total_input_bytes,
         total_output_bytes=total_output_bytes,
         results=results,
+        skipped=skipped,
     )
     report.write_json(output_dir / "batch_report.json")
     return report

@@ -173,6 +173,7 @@ class BatchRequest(BaseModel):
                 "jobs": 4,
                 "pdfa": False,
                 "force_ocr": False,
+                "force": False,
             }
         }
     )
@@ -185,6 +186,9 @@ class BatchRequest(BaseModel):
     jobs: int | None = None
     pdfa: bool = False
     force_ocr: bool = False
+    # Reprocess inputs whose same-name output already exists (default:
+    # skip them — incremental batch).
+    force: bool = False
 
 
 class BatchAcceptedResponse(BaseModel):
@@ -615,6 +619,7 @@ async def start_batch(req: BatchRequest, background_tasks: BackgroundTasks):
                 jobs=jobs,
                 pdfa=req.pdfa,
                 force_ocr=req.force_ocr,
+                force=req.force,
                 progress_callback=cb,
             )
             job_storage.finish_batch_job(
