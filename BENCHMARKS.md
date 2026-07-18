@@ -4,6 +4,14 @@ Real-input benchmarks against two representative scanner outputs. The
 data here justifies every design rule in `CLAUDE.md` and every Phase
 2 work item in `ROADMAP.md`.
 
+> **Caveat (2026-07-18):** OCR-branch numbers for the `smallest` preset
+> were measured when the pipeline still passed `--jbig2-lossy` to
+> OCRmyPDF. Upstream has since removed lossy JBIG2 (character-
+> substitution risk) and the pipeline no longer passes the flag, so
+> `smallest` OCR-branch output may be somewhat larger on current
+> OCRmyPDF versions than recorded here. Compress-only numbers
+> (Ghostscript path) are unaffected.
+
 ## Headline findings
 
 1. **Two of three presets *grow* the file.** On already-OCR'd scanner

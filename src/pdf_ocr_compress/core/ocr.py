@@ -121,12 +121,10 @@ def run_ocr(
         # OCR strategy
         args.append("--force-ocr" if force_ocr else "--skip-text")
 
-        # Optimization level per preset
+        # Optimization level per preset. (The old `--jbig2-lossy` extra
+        # for "smallest" is gone: OCRmyPDF removed lossy JBIG2 over
+        # character-substitution risk and now ignores the flag.)
         args += _optimize_args(preset)
-
-        # Optional: lossy JBIG2 only for "smallest" preset
-        if preset == "smallest":
-            args += ["--jbig2-lossy"]
 
         # Optional PDF/A-2
         if pdfa:
