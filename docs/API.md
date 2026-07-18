@@ -204,7 +204,7 @@ JSON body:
 | `jobs` | int | settings default | Same semantics as `/api/process`. |
 | `pdfa` | bool | `false` | Same semantics as `/api/process`. |
 | `force_ocr` | bool | `false` | Same semantics as `/api/process`. |
-| `force` | bool | `false` | Reprocess inputs whose same-name output already exists in `output_dir`. Batches are incremental by default: such inputs are skipped (`status: "skipped"` in the report), so re-running over a growing folder only processes new files. The check is existence-only — a rescanned input with an unchanged filename counts as done until `force` is used. |
+| `force` | bool | `false` | Reprocess inputs whose same-name output already exists in `output_dir`. Batches are incremental by default: such inputs are skipped (`status: "skipped"` in the report), so re-running over a growing folder only processes new files. The check is existence-only — a rescanned input with an unchanged filename counts as done until `force` is used. On a forced rerun the fresh output **replaces the previous one in place** once processing succeeds; a failed rerun keeps the previous output. (Scoped exception to the never-overwrite rule: batch outputs only — inputs are never touched.) |
 
 curl example:
 

@@ -8,6 +8,7 @@ OCR routing, structured ProcessResult) keeps applying per-file.
 """
 
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -190,18 +191,25 @@ def run_batch(
     start_t = time.time()
 
     skipped_results: dict[Path, BatchResult] = {}
+    had_existing: set[Path] = set()
     to_process: list[Path] = []
     for pdf in pdfs:
         existing = output_dir / pdf.name
-        if not force and existing.exists():
-            skipped_results[pdf] = BatchResult(
-                input_path=pdf,
-                output_path=existing,
-                status="skipped",
-                attempts=0,
-                error_msg=None,
-                process_result=None,
-            )
+        if existing.exists():
+            if force:
+                # Force-reprocess: the stale output will be replaced in
+                # place once the fresh output succeeds (F-023).
+                had_existing.add(pdf)
+                to_process.append(pdf)
+            else:
+                skipped_results[pdf] = BatchResult(
+                    input_path=pdf,
+                    output_path=existing,
+                    status="skipped",
+                    attempts=0,
+                    error_msg=None,
+                    process_result=None,
+                )
         else:
             to_process.append(pdf)
 
@@ -231,13 +239,12 @@ def run_batch(
             force_ocr=force_ocr,
         )
         if result is not None:
-            successes[pdf] = BatchResult(
-                input_path=pdf,
-                output_path=result.output_path,
-                status="ok",
+            successes[pdf] = _success_result(
+                pdf,
+                result,
                 attempts=1,
-                error_msg=None,
-                process_result=result,
+                output_dir=output_dir,
+                replace_stale=pdf in had_existing,
             )
             continue
 
@@ -253,13 +260,12 @@ def run_batch(
             force_ocr=force_ocr,
         )
         if result is not None:
-            successes[pdf] = BatchResult(
-                input_path=pdf,
-                output_path=result.output_path,
-                status="ok",
+            successes[pdf] = _success_result(
+                pdf,
+                result,
                 attempts=2,
-                error_msg=None,
-                process_result=result,
+                output_dir=output_dir,
+                replace_stale=pdf in had_existing,
             )
             continue
 
@@ -281,13 +287,12 @@ def run_batch(
         )
         total_attempts = prior_attempts + 1
         if result is not None:
-            successes[pdf] = BatchResult(
-                input_path=pdf,
-                output_path=result.output_path,
-                status="ok",
+            successes[pdf] = _success_result(
+                pdf,
+                result,
                 attempts=total_attempts,
-                error_msg=None,
-                process_result=result,
+                output_dir=output_dir,
+                replace_stale=pdf in had_existing,
             )
         else:
             final_failures[pdf] = BatchResult(
@@ -335,6 +340,38 @@ def run_batch(
     )
     report.write_json(output_dir / "batch_report.json")
     return report
+
+
+def _success_result(
+    pdf: Path,
+    result: ProcessResult,
+    *,
+    attempts: int,
+    output_dir: Path,
+    replace_stale: bool,
+) -> BatchResult:
+    """Record a per-file success; under force-reprocess, replace the
+    stale same-name output in place (F-023).
+
+    Scoped exception to the never-overwrite rule: batch OUTPUTS only,
+    only under force=True, and only after the fresh output fully
+    succeeded — a failed rerun leaves the stale file untouched. The
+    fresh file was collision-renamed by the pipeline (the stale target
+    existed), so os.replace moves it over the stale copy.
+    """
+    if replace_stale:
+        target = output_dir / pdf.name
+        if result.output_path != target:
+            os.replace(result.output_path, target)
+            result.output_path = target
+    return BatchResult(
+        input_path=pdf,
+        output_path=result.output_path,
+        status="ok",
+        attempts=attempts,
+        error_msg=None,
+        process_result=result,
+    )
 
 
 def _attempt_once(

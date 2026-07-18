@@ -123,7 +123,11 @@ def batch(
     force: bool = typer.Option(
         False,
         "--force",
-        help="Reprocess inputs whose outputs already exist (default: skip them).",
+        help=(
+            "Reprocess inputs whose outputs already exist (default: skip "
+            "them). The fresh output replaces the previous one in place "
+            "on success; a failed rerun keeps the previous output."
+        ),
     ),
 ):
     """Process every *.pdf in INPUT_DIR; write results + batch_report.json to --output-dir.

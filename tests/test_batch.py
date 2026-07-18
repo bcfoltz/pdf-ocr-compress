@@ -561,6 +561,77 @@ def test_run_batch_force_reprocesses_existing_outputs(monkeypatch, tmp_path):
     assert report.succeeded == 1
 
 
+def test_force_replaces_stale_output_in_place(monkeypatch, tmp_path):
+    """F-023: with force=True, the fresh output replaces the stale
+    same-name output instead of accumulating a timestamped duplicate
+    beside it. Scoped exception to never-overwrite: batch OUTPUTS only,
+    and only after the fresh output fully succeeded.
+    """
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    _make_pdf(in_dir / "done.pdf", b"%PDF-1.4 input\n")
+    _make_pdf(out_dir / "done.pdf", b"%PDF-1.4 STALE\n")
+
+    def fake(input_pdf, output_pdf, **kwargs):
+        # Mimic the core's collision behavior: the target exists, so the
+        # pipeline writes to a unique_output_path-style renamed file.
+        out = Path(output_pdf)
+        if out.exists():
+            out = out.with_name(f"{out.stem}_processed_20260718.pdf")
+        out.write_bytes(b"%PDF-1.4 FRESH\n")
+        return ProcessResult(
+            output_path=out,
+            input_bytes=Path(input_pdf).stat().st_size,
+            output_bytes=out.stat().st_size,
+            pct_change=-10.0,
+            ocr_ran=False,
+            ocr_skipped_reason="input_has_text_layer",
+            processing_seconds=0.01,
+            preset_actually_used="smallest",
+            pdfminer_text_extractable=True,
+        )
+
+    monkeypatch.setattr(batch_mod, "run_pipeline", fake)
+
+    report = batch_mod.run_batch(in_dir, out_dir, force=True)
+
+    target = out_dir / "done.pdf"
+    assert target.read_bytes() == b"%PDF-1.4 FRESH\n"
+    # No timestamped duplicate left behind.
+    assert sorted(p.name for p in out_dir.glob("*.pdf")) == ["done.pdf"]
+    # The report points at the final (replaced) path, not the temp name.
+    assert report.results[0].output_path == target
+    assert report.results[0].process_result.output_path == target
+
+
+def test_force_failure_preserves_stale_output(monkeypatch, tmp_path):
+    """Crash safety for F-023: if the forced rerun fails, the stale
+    output survives untouched — replacement happens only on success.
+    """
+    from pdf_ocr_compress.core import batch as batch_mod
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    _make_pdf(in_dir / "done.pdf", b"%PDF-1.4 input\n")
+    _make_pdf(out_dir / "done.pdf", b"%PDF-1.4 STALE\n")
+
+    def always_fail(input_pdf, output_pdf, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(batch_mod, "run_pipeline", always_fail)
+
+    report = batch_mod.run_batch(in_dir, out_dir, force=True)
+
+    assert report.failed == 1
+    assert (out_dir / "done.pdf").read_bytes() == b"%PDF-1.4 STALE\n"
+
+
 def test_run_batch_mixed_new_and_done(monkeypatch, tmp_path):
     """New files are processed while already-done files are skipped;
     report counts and byte totals cover only the processed files.
