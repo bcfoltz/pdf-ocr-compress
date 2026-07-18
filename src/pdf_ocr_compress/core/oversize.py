@@ -89,9 +89,7 @@ def enforce_oversize_policy(
         return output_path
 
     if can_retry and retry_with_smallest is not None:
-        logger.info(
-            f"{msg}; retrying with smallest preset (oversize_policy=fallback)"
-        )
+        logger.info(f"{msg}; retrying with smallest preset (oversize_policy=fallback)")
         try:
             output_path.unlink()
         except OSError:
